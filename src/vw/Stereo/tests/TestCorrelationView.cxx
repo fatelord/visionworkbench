@@ -22,8 +22,6 @@
 #include <vw/Stereo/CorrelationView.h>
 #include <boost/random/linear_congruential.hpp>
 
-#include <vw/Image.h>
-
 using namespace vw;
 using namespace vw::stereo;
 
@@ -32,12 +30,12 @@ class CorrelationViewTest : public ::testing::Test {
 protected:
   CorrelationViewTest(){}
 
-  typedef PixelT pixel_type;
+  typedef PixelT            pixel_type;
   typedef ImageView<PixelT> image_type;
   typedef typename PixelChannelType<PixelT>::type channel_type;
   image_type input1, input2;
-  Vector2i kernel_size;
-  BBox2i search_volume;
+  Vector2i   kernel_size;
+  BBox2i     search_volume;
 
   virtual void SetUp() {
     boost::rand48 gen(10);

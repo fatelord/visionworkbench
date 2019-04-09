@@ -58,11 +58,15 @@ include_HEADERS = \
   DiskImageResource.h \
   DiskImageResourcePBM.h \
   DiskImageResourcePDS.h \
+  DiskImageResourceRaw.h \
   DiskImageView.h \
+  DiskImageUtils.h \
+  DiskImageManager.h \
   MemoryImageResource.h \
   KML.h \
   ScanlineIO.h \
   TemporaryFile.h \
+  FileUtils.h \
   $(gdal_headers) \
   $(hdf_headers) \
   $(jpeg_headers) \
@@ -74,10 +78,12 @@ libvwFileIO_la_SOURCES = \
   DiskImageResource.cc \
   DiskImageResourcePBM.cc \
   DiskImageResourcePDS.cc \
+  DiskImageResourceRaw.cc \
   KML.cc \
   MemoryImageResource.cc \
   ScanlineIO.cc \
   TemporaryFile.cc \
+  FileUtils.cc \
   $(gdal_sources) \
   $(hdf_sources) \
   $(jpeg_sources) \

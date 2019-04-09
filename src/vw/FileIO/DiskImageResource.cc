@@ -35,6 +35,7 @@
 #include <vw/FileIO/DiskImageResource.h>
 #include <vw/FileIO/DiskImageResourcePDS.h>
 #include <vw/FileIO/DiskImageResourcePBM.h>
+#include <vw/FileIO/DiskImageResourceRaw.h>
 
 #if defined(VW_HAVE_PKG_PNG) && VW_HAVE_PKG_PNG==1
 #include <vw/FileIO/DiskImageResourcePNG.h>
@@ -66,6 +67,8 @@
 #include <boost/algorithm/string.hpp>
 #include <boost/filesystem/convenience.hpp>
 namespace fs = boost::filesystem;
+
+// TODO: Clean up properly so valgrind does not report memory leaks!
 
 static void register_default_file_types_impl();
 namespace {
@@ -131,9 +134,10 @@ void vw::DiskImageResource::register_file_type( std::string const& extension,
   register_file_type_internal(boost::to_lower_copy(extension), disk_image_resource_type, open_func, create_func);
 }
 
+/// Hidden function to set up all the default supported types.
 static void register_default_file_types_impl() {
 
-  if( ! open_map ) open_map = new OpenMapType();
+  if( ! open_map   ) open_map   = new OpenMapType();
   if( ! create_map ) create_map = new CreateMapType();
 
 // Let's cut the verbosity of this func just a bit.
@@ -188,6 +192,7 @@ static void register_default_file_types_impl() {
   if (vw::DiskImageResourceGDAL::gdal_has_support(".tif") && vw::DiskImageResourceGDAL::gdal_has_support(".tiff")) {
     REGISTER(".tif", GDAL)
     REGISTER(".tiff", GDAL)
+    REGISTER(".vrt", GDAL)
   } else {
 #endif
 #if defined(VW_HAVE_PKG_TIFF) && VW_HAVE_PKG_TIFF==1
@@ -206,12 +211,10 @@ static void register_default_file_types_impl() {
   REGISTER(".pbm", PBM)
   REGISTER(".pgm", PBM)
   REGISTER(".ppm", PBM)
+  REGISTER(".bil", Raw)
+  REGISTER(".bip", Raw)
+  REGISTER(".bsq", Raw)
 #undef REGISTER
-}
-
-// Kill this function eventually.. it's marked as deprecated now.
-void vw::DiskImageResource::register_default_file_types() {
-  register_default_file_types_internal();
 }
 
 vw::DiskImageResource* vw::DiskImageResource::open( std::string const& filename ) {
@@ -266,3 +269,21 @@ vw::DiskImageResource* vw::DiskImageResource::create( std::string const& filenam
   vw_throw( NoImplErr() << "Unsupported file format: " << filename );
   return 0; // never reached
 }
+
+vw::ImageFormat vw::image_format(const std::string& filename) {
+  boost::shared_ptr<vw::DiskImageResource> src(vw::DiskImageResourcePtr(filename));
+  return src->format();
+}
+
+// Return a smart pointer, this is easier to manage
+boost::shared_ptr<vw::DiskImageResource> vw::DiskImageResourcePtr(std::string const& image_file){
+  return boost::shared_ptr<vw::DiskImageResource>(vw::DiskImageResource::open(image_file));
+}
+
+
+vw::Vector2i vw::file_image_size( std::string const& input ) {
+  boost::shared_ptr<DiskImageResource> rsrc( DiskImageResourcePtr(input));
+  Vector2i size( rsrc->cols(), rsrc->rows() );
+  return size;
+}
+

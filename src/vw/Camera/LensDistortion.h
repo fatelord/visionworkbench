@@ -27,41 +27,86 @@
 
 #include <iosfwd>
 #include <string>
-
 #include <boost/smart_ptr/shared_ptr.hpp>
 
 namespace vw {
 namespace camera {
 
-  // forward decl
+  // Forward declaration
   class PinholeModel;
 
+  /// Base class which all distortion models inherit from.
+  /// Trivia: Back in 2009 this was implemented using CRTP. See commit
+  /// e2749b36d3db37f3176acd8907434dbf4ab29096.
   class LensDistortion {
+  protected:
+    std::vector<std::string> m_distortion_param_names;
   public:
-    LensDistortion();
+    LensDistortion() {}
 
-    virtual ~LensDistortion();
-    virtual Vector2 distorted_coordinates(const PinholeModel&, Vector2 const&) const;
+    virtual ~LensDistortion() {}
+
+    // For the two functions below, default implementations are provided in which a
+    //  solver attempts to use the *other* function to find the answer.
+    
+    /// From an undistorted input coordinate, compute the distorted coordinate.
+    /// - The input location is in the same units as the focal length that was provided to 
+    ///   the PinholeModel class.
+    virtual Vector2 distorted_coordinates  (const PinholeModel&, Vector2 const&) const;
+   
+    /// From a distorted input coordinate, compute the undistorted coordinate.
+    /// - The input location is in the same units as the focal length that was provided to 
+    ///   the PinholeModel class.
     virtual Vector2 undistorted_coordinates(const PinholeModel&, Vector2 const&) const;
+    
+    /// Write all the distortion parameters to the stream
     virtual void write(std::ostream & os) const = 0;
+    
+    /// Read all the distortion parameters from the stream
+    virtual void read(std::istream & os) = 0;
+    
+    /// Return a pointer to a copy of this distortion object
     virtual boost::shared_ptr<LensDistortion> copy() const = 0;
+    
+    /// Return a vector containing all the distortion parameters.
     virtual Vector<double> distortion_parameters() const;
 
-    virtual std::string name() const = 0;
-    virtual void scale(float scale) = 0; // Used to scale distortion w/ image size
-  };
+    /// Initialize the object from a set of distortion parameters.
+    virtual void set_distortion_parameters(Vector<double> const& params);
 
+    // Number of distortion parameters
+    virtual int num_dist_params() const = 0;
+
+    /// Each derived model needs to have a string name.
+    virtual std::string name() const = 0;
+    
+    /// Used to scale distortion with image size
+    virtual void scale(double scale) = 0;
+    
+    /// Used to scale distortion with image size
+    std::vector<std::string> distortion_param_names() const { return m_distortion_param_names; }
+  }; // End class LensDistortion
+
+  /// Write any derived lens distortion class to the stream.
   std::ostream& operator<<(std::ostream& os, const LensDistortion& ld);
+
+
+  // ------------------------------------------------------------------------------
+  // -- Derived classes section
+
 
   /// A NULL lens distortion model.
   struct NullLensDistortion : public LensDistortion {
-    inline Vector2 distorted_coordinates(const PinholeModel&, Vector2 const& v) const { return v; }
-    inline Vector2 undistorted_coordinates(const PinholeModel&, Vector2 const& v) const { return v; }
+    virtual Vector2 distorted_coordinates  (const PinholeModel&, Vector2 const& v) const { return v; }
+    virtual Vector2 undistorted_coordinates(const PinholeModel&, Vector2 const& v) const { return v; }
+    virtual int num_dist_params() const { return 0; };
 
-    boost::shared_ptr<LensDistortion> copy() const;
-    void write(std::ostream & os) const;
-    std::string name() const;
-    void scale(float /*scale*/);
+    virtual boost::shared_ptr<LensDistortion> copy() const;
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+    static  std::string class_name()       { return "NULL";       }
+    virtual std::string name      () const { return class_name(); }
+    virtual void        scale(double /*scale*/);
   };
 
   /// TSAI Lens Distortion Model
@@ -81,24 +126,36 @@ namespace camera {
   /// v' = v + (v - cy) * (k1 * r2 + k2 * r4 + 2 * p2 * x + p1 * (r2/y + 2y))
   ///
   /// k1 is distortion[0], k2 is distortion[1],  p1 is distortion[2], p2 is distortion[3]
+  /// The input pixel value is normalivzed before the calculations are performed.
   ///
   /// References: Roger Tsai, A Versatile Camera Calibration Technique for a High-Accuracy 3D
   /// Machine Vision Metrology Using Off-the-shelf TV Cameras and Lenses
+  ///
+  /// Be careful when you find a camera calibration result with K1/K2, even though the names
+  ///  are the same they could be used in a different way than the TSAI model!!!
 
   class TsaiLensDistortion : public LensDistortion {
-    Vector4 m_distortion;
   public:
-    TsaiLensDistortion(Vector4 const& params);
-    Vector<double> distortion_parameters() const;
-    boost::shared_ptr<LensDistortion> copy() const;
+    static const size_t num_distortion_params = 4;
+    TsaiLensDistortion();
+    TsaiLensDistortion(Vector<double> const& params);
+    virtual Vector<double> distortion_parameters() const;
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return num_distortion_params; }
+    virtual boost::shared_ptr<LensDistortion> copy() const;
 
-    //  Location where the given pixel would have appeared if there were no lens distortion.
-    Vector2 distorted_coordinates(const PinholeModel&, Vector2 const&) const;
-    void write(std::ostream & os) const;
+    virtual Vector2 distorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
 
-    std::string name() const;
+    static  std::string class_name()       { return "TSAI";       }
+    virtual std::string name      () const { return class_name(); }
+    virtual void        scale( double scale );
+    void init_distortion_param_names();
 
-    void scale( float scale );
+  private:
+    Vector<double, num_distortion_params> m_distortion;
   };
 
   /// Brown Conrady Distortion
@@ -112,25 +169,33 @@ namespace camera {
   /// Close-Range Camera Calibration - D.C. Brown,
   ///   Photogrammetric Engineering, pages 855-866, Vol. 37, No. 8, 1971
   class BrownConradyDistortion : public LensDistortion {
-    Vector2 m_principal_point;
-    Vector3 m_radial_distortion;
-    Vector2 m_centering_distortion;
-    double m_centering_angle;
   public:
+    static const size_t num_distortion_params = 8;
+    BrownConradyDistortion();
     BrownConradyDistortion( Vector<double> const& params );
     BrownConradyDistortion( Vector<double> const& principal,
                             Vector<double> const& radial,
                             Vector<double> const& centering,
                             double const& angle );
 
-    Vector<double> distortion_parameters() const;
-    boost::shared_ptr<LensDistortion> copy() const;
+    virtual Vector<double> distortion_parameters() const;
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return num_distortion_params; }
+    virtual boost::shared_ptr<LensDistortion> copy() const;
 
-    Vector2 undistorted_coordinates(const PinholeModel&, Vector2 const&) const;
+    virtual Vector2 undistorted_coordinates(const PinholeModel&, Vector2 const&) const;
 
-    void write(std::ostream& os) const;
-    std::string name() const;
-    void scale( float /*scale*/ );
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+    static  std::string class_name()       { return "BrownConrady"; }
+    virtual std::string name      () const { return class_name();   }
+    virtual void        scale( double /*scale*/ );
+    void init_distortion_param_names();
+  private:
+    Vector2 m_principal_point;      // xp, yp
+    Vector3 m_radial_distortion;    // K1, K2, K3
+    Vector2 m_centering_distortion; // P1, P2
+    double  m_centering_angle;      // phi
   };
 
   /// Adjustable Tsai Distortion
@@ -141,25 +206,219 @@ namespace camera {
   /// the Matlab Camera Calibration Tool Box.
   ///
   /// Coefficients are [r2,r4,r6, ...., t1, t2, alpha]. The last 3
-  /// elements tangential and alpha are always supplied.
+  /// elements tangential and alpha(=skew) are always supplied.
   ///
   /// References:
   /// http://www.vision.caltech.edu/bouguetj/calib_doc/htmls/parameters.html
   class AdjustableTsaiLensDistortion : public LensDistortion {
     Vector<double> m_distortion;
   public:
+    AdjustableTsaiLensDistortion() {}
     AdjustableTsaiLensDistortion(Vector<double> params);
-    Vector<double> distortion_parameters() const;
-    boost::shared_ptr<LensDistortion> copy() const;
+    virtual Vector<double> distortion_parameters() const;
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return m_distortion.size(); }
+    virtual boost::shared_ptr<LensDistortion> copy() const;
 
-    //  Location where the given pixel would have appeared if there were no lens distortion.
-    Vector2 distorted_coordinates(PinholeModel const&, Vector2 const&) const;
+    virtual Vector2 distorted_coordinates(PinholeModel const&, Vector2 const&) const;
 
-    void write(std::ostream & os) const;
-    std::string name() const;
-    void scale( float /*scale*/ );
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+    
+    static  std::string class_name()       { return "AdjustableTSAI"; }
+    virtual std::string name      () const { return class_name(); }
+    virtual void scale( double /*scale*/ );
+  };
+  
+  /// Photometrix Lens Distortion Model
+  ///
+  /// This model is similar to the TSAI model above but it differs slightly
+  /// to match the conventions used by the Australis software from Photometrix.
+  /// This type of calibration was originally seen for the NASA IceBridge cameras.
+  ///
+  /// Parameters used: c, xp, yp, K1, K2, K3, P1, P2, B1, B2
+  ///  - c (focal length) comes from the base class so 
+  ///    the parameters stored here are [xp, py, K1, K2, K3, P1, P2, B1, B2]
+  ///
+  /// As copied from a sample output calibration file:
+  ///
+  /// x = x(meas) - xp
+  /// y = y(meas) - yp
+  /// x and y are now with respect to the principle point.
+  ///
+  /// r2 = x * x + y * y
+  /// dr = K1*r3 + K2*r5 + K3*r7
+  /// 
+  /// x(corr) = x(meas) - xp + x*dr/r + P1*(r2 +2x^2) + 2*P2*x*y
+  /// y(corr) = y(meas) - yp + y*dr/r + P2*(r2 +2y^2) + 2*P1*x*y
+  ///
+  /// k1, k2 are radial distortion parameters; p1, p2 are tangential distortion
+  /// parameters. principal point is at (xp, yp). B1 and B2 are not used yet.
+  ///
+  class PhotometrixLensDistortion : public LensDistortion {
+    Vector<double> m_distortion;
+  public:
+    PhotometrixLensDistortion();
+    PhotometrixLensDistortion(Vector<double> const& params);
+    virtual Vector<double> distortion_parameters() const;
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return m_distortion.size(); }
+    virtual boost::shared_ptr<LensDistortion> copy() const;
+
+    virtual Vector2 undistorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+
+    static  std::string class_name()       { return "Photometrix"; }
+    virtual std::string name      () const { return class_name();  }
+
+    virtual void scale( double scale );
+    void init_distortion_param_names();
   };
 
+  // RPC lens distortion of arbitrary degree.  Undistortion is done
+  // analogously using a second set of coefficients.  undistortion
+  // parameters are computed.
+  // TODO: Make undistortion computation a member of this class.
+  class RPCLensDistortion : public LensDistortion {
+    int m_rpc_degree;
+    Vector2i m_image_size;
+    Vector<double> m_distortion, m_undistortion;
+    
+    // This variable signals that the coefficients needed to perform undistortion
+    // have been computed.
+    bool m_can_undistort;
+
+    // Compute the RPC model with given coeffcient at the given point
+    Vector2 compute_rpc(Vector2 const& p, Vector<double> const& coeffs) const;
+  public:
+    
+    RPCLensDistortion();
+    RPCLensDistortion(Vector<double> const& params);
+    void reset(int rpc_degree);  // Form the identity transform
+    static int rpc_degree(int num_dist_params) {
+      return int(round(sqrt(2.0*num_dist_params + 5.0)/2.0 - 1.5));
+    }
+    int rpc_degree() const { return m_rpc_degree; }
+    virtual Vector<double> distortion_parameters() const;
+    Vector<double> undistortion_parameters() const;
+    void set_image_size(Vector2i const& image_size);
+    Vector2i image_size() const { return m_image_size; } 
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    void set_undistortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return m_distortion.size(); }
+    static int num_dist_params(int rpc_degree) { return 2*(rpc_degree+1)*(rpc_degree+2)-2; }
+    virtual boost::shared_ptr<LensDistortion> copy() const;
+
+    virtual Vector2 distorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    virtual Vector2 undistorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os); 
+
+    static  std::string class_name()       { return "RPC"; }
+    virtual std::string name      () const { return class_name();  }
+
+    virtual void scale( double scale );
+    
+    bool can_undistort() const { return m_can_undistort; }
+    static void init_as_identity(Vector<double> & params);
+  private:
+    static void validate_distortion_params(Vector<double> const& params);
+    static void unpack_params(Vector<double> const& params,
+                              Vector<double> & num_x, Vector<double> & den_x,
+                              Vector<double> & num_y, Vector<double> & den_y);
+    static void pack_params(Vector<double> & params,
+                            Vector<double> const& num_x, Vector<double> const& den_x,
+                            Vector<double> const& num_y, Vector<double> const& den_y);
+  };
+  
+  // Old RPC distortion of degree 4. It is deprecated but still
+  // supported as it was used in Icebridge.
+  class RPCLensDistortion4 : public LensDistortion {
+    Vector2i m_image_size;
+    Vector<double> m_distortion, m_undistortion;
+    
+    // This variable signals that the coefficients needed to perform undistortion
+    // have been computed.
+    bool m_can_undistort;
+
+    // Compute the RPC model with given coeffcient at the given point
+    Vector2 compute_rpc(Vector2 const& p, Vector<double> const& coeffs) const;
+
+  public:
+    
+    static const size_t num_distortion_params = 15 + 15 + 14 + 14; // 2*(n+1)*(n+2)-2, n=4
+
+    RPCLensDistortion4();
+    RPCLensDistortion4(Vector<double> const& params);
+    virtual Vector<double> distortion_parameters() const;
+    Vector<double> undistortion_parameters() const;
+    Vector2i image_size() const { return m_image_size;} 
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    void set_undistortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return num_distortion_params; }
+    void set_image_size(Vector2i const& image_size);
+    virtual boost::shared_ptr<LensDistortion> copy() const;
+
+    virtual Vector2 distorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    virtual Vector2 undistorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+
+    static  std::string class_name()       { return "RPC4"; }
+    virtual std::string name      () const { return class_name();  }
+
+    virtual void scale( double scale );
+
+    bool can_undistort() const { return m_can_undistort; }
+  };
+
+  // Old RPC distortion of degree 5. It is deprecated but still
+  // supported as it was used in Icebridge.
+  class RPCLensDistortion5 : public LensDistortion {
+    Vector2i m_image_size;
+    Vector<double> m_distortion, m_undistortion;
+    
+    // This variable signals that the coefficients needed to perform undistortion
+    // have been computed.
+    bool m_can_undistort;
+
+    // Compute the RPC model with given coeffcient at the given point
+    Vector2 compute_rpc(Vector2 const& p, Vector<double> const& coeffs) const;
+
+  public:
+    
+    static const size_t num_distortion_params = 21 + 21 + 20 + 20; // 2*(n+1)*(n+2)-2, n=5
+
+    RPCLensDistortion5();
+    RPCLensDistortion5(Vector<double> const& params);
+    virtual Vector<double> distortion_parameters() const;
+    Vector<double> undistortion_parameters() const;
+    Vector2i image_size() const { return m_image_size;} 
+    virtual void set_distortion_parameters(Vector<double> const& params);
+    void set_undistortion_parameters(Vector<double> const& params);
+    virtual int num_dist_params() const { return num_distortion_params; }
+    void set_image_size(Vector2i const& image_size);
+    virtual boost::shared_ptr<LensDistortion> copy() const;
+
+    virtual Vector2 distorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    virtual Vector2 undistorted_coordinates(const PinholeModel& cam, Vector2 const& p) const;
+    
+    virtual void write(std::ostream& os) const;
+    virtual void read (std::istream& os);
+
+    static  std::string class_name()       { return "RPC5"; }
+    virtual std::string name      () const { return class_name();  }
+
+    virtual void scale( double scale );
+
+    bool can_undistort() const { return m_can_undistort; }
+  };
+
+  
 }} // namespace vw::camera
 
 #endif // __VW_CAMERA_LENSDISTORTION_H__

@@ -45,27 +45,30 @@ namespace ba {
   template <class ImplT, size_t CameraParamsN, size_t PointParamsN>
   class ModelBase {
   public:
-    static const size_t camera_params_n = CameraParamsN;
-    static const size_t point_params_n = PointParamsN;
+    static const size_t camera_params_n         = CameraParamsN;
+    static const size_t point_params_n          = PointParamsN;
+    static const size_t focal_length_params_n   = 1;
+    static const size_t optical_center_params_n = 2;
+    static const size_t nonlens_intrinsics_n    = focal_length_params_n + optical_center_params_n;
 
     /// \cond INTERNAL
     // Methods to access the derived type
-    inline ImplT& impl() { return static_cast<ImplT&>(*this); }
+    inline ImplT      & impl()       { return static_cast<ImplT      &>(*this); }
     inline ImplT const& impl() const { return static_cast<ImplT const&>(*this); }
     /// \endcond
 
     // Required access to camera
-    Vector2 operator() ( size_t i, size_t j,
-                         Vector<double,camera_params_n> const& a_j,
-                         Vector<double,point_params_n> const& b_i ) {
-      return impl()(i,j,a_j,b_i);
+    Vector2 cam_pixel ( size_t i, size_t j,
+                         Vector<double,camera_params_n> const& cam_j,
+                         Vector<double,point_params_n> const& point_i ) {
+      return impl().cam_pixel(i,j,cam_j,point_i);
     }
 
-    // Approximate the jacobian for small variations in the a_j
+    // Approximate the jacobian for small variations in the cam_j
     // parameters (camera parameters).
-    inline Matrix<double, 2, CameraParamsN> A_jacobian ( size_t i, size_t j,
-                                                         Vector<double, CameraParamsN> const& a_j,
-                                                         Vector<double, PointParamsN> const& b_i ) {
+    inline Matrix<double, 2, CameraParamsN> cam_jacobian ( size_t i, size_t j,
+                                                         Vector<double, CameraParamsN> const& cam_j,
+                                                         Vector<double, PointParamsN> const& point_i ) {
 
       // Jacobian is #outputs x #params
       Matrix<double, 2, CameraParamsN> J;
@@ -73,8 +76,8 @@ namespace ba {
       Vector2 h0;
       try {
         // Get nominal function value
-        h0 = impl()(i,j,a_j,b_i);
-      } catch (const camera::PixelToRayErr& e) {
+        h0 = impl().cam_pixel(i,j,cam_j,point_i);
+      } catch (const camera::PointToPixelErr& e) {
         // Unable to project this point into the camera, so abort!
         return J;
       }
@@ -82,18 +85,18 @@ namespace ba {
       // For each param dimension, add epsilon and re-evaluate h() to
       // get numerical derivative w.r.t. that parameter
       for ( size_t n=0; n < CameraParamsN; ++n ){
-        Vector<double, CameraParamsN> a_j_prime = a_j;
+        Vector<double, CameraParamsN> cam_j_prime = cam_j;
 
         // Variable step size, depending on parameter value
-        double epsilon = 1e-7 + fabs(a_j(n)*1e-7);
-        a_j_prime(n) += epsilon;
+        double epsilon = 1e-7 + fabs(cam_j(n)*1e-7);
+        cam_j_prime(n) += epsilon;
 
         // Evaluate function with this step and compute the derivative
         // w.r.t. parameter i
         try {
-          Vector2 hi = impl()(i,j,a_j_prime, b_i);
+          Vector2 hi = impl().cam_pixel(i,j,cam_j_prime, point_i);
           select_col(J,n) = (hi-h0)/epsilon;
-        } catch (const camera::PixelToRayErr& e) {
+        } catch (const camera::PointToPixelErr& e) {
           select_col(J,n) = Vector2();
         }
       }
@@ -101,11 +104,11 @@ namespace ba {
       return J;
     }
 
-    // Approximate the jacobian for small variations in the b_i
+    // Approximate the jacobian for small variations in the point_i
     // parameters (3d point locations).
-    inline Matrix<double, 2, PointParamsN> B_jacobian ( size_t i, size_t j,
-                                                        Vector<double, CameraParamsN> const& a_j,
-                                                        Vector<double, PointParamsN> const& b_i ) {
+    inline Matrix<double, 2, PointParamsN> point_jacobian ( size_t i, size_t j,
+                                                        Vector<double, CameraParamsN> const& cam_j,
+                                                        Vector<double, PointParamsN> const& point_i ) {
 
       // Jacobian is #outputs x #params
       Matrix<double, 2, PointParamsN> J;
@@ -113,8 +116,8 @@ namespace ba {
       Vector2 h0;
       try {
         // Get nominal function value
-        h0 = impl()(i,j,a_j, b_i);
-      } catch (const camera::PixelToRayErr& e) {
+        h0 = impl().cam_pixel(i,j,cam_j, point_i);
+      } catch (const camera::PointToPixelErr& e) {
         // Unable to project this point into the camera so abort!
         return J;
       }
@@ -122,18 +125,18 @@ namespace ba {
       // For each param dimension, add epsilon and re-evaluate h() to
       // get numerical derivative w.r.t. that parameter
       for ( size_t n=0; n < PointParamsN; ++n ){
-        Vector<double, PointParamsN> b_i_prime = b_i;
+        Vector<double, PointParamsN> point_i_prime = point_i;
 
         // Variable step size, depending on parameter value
-        double epsilon = 1e-7 + fabs(b_i(n)*1e-7);
-        b_i_prime(n) += epsilon;
+        double epsilon = 1e-7 + fabs(point_i(n)*1e-7);
+        point_i_prime(n) += epsilon;
 
         // Evaluate function with this step and compute the derivative
         // w.r.t. parameter i
         try {
-          Vector2 hi = impl()(i,j,a_j,b_i_prime);
+          Vector2 hi = impl().cam_pixel(i,j,cam_j,point_i_prime);
           select_col(J,n) = (hi-h0)/epsilon;
-        } catch (const camera::PixelToRayErr& e) {
+        } catch (const camera::PointToPixelErr& e) {
           select_col(J,n) = Vector2();
         }
       }
@@ -142,10 +145,11 @@ namespace ba {
 
     // -- Report Functions -------------------------------------------
 
-    std::string image_unit() { return "pixels"; }
-    std::string camera_position_unit() { return "meters"; }
-    std::string camera_pose_unit() { return "radians"; }
-    std::string gcp_unit() { return "meters"; }
+    std::string image_unit          () { return "pixels";  }
+    std::string camera_position_unit() { return "meters";  }
+    std::string camera_pose_unit    () { return "radians"; }
+    std::string gcp_unit            () { return "meters";  }
+    
     // Forcing the user to define
     inline double image_compare( Vector2 const& meas,
                                  Vector2 const& obj ) {

@@ -44,9 +44,12 @@
 #define __VW_IMAGE_STATISTICS_H__
 
 #include <boost/type_traits.hpp>
-
+#include <vw/Math/Statistics.h>
 #include <vw/Image/ImageViewBase.h>
+#include <vw/Image/ImageView.h>
 #include <vw/Image/PixelMask.h>
+#include <vw/Image/BlockImageOperator.h>
+#include <vw/Image/EdgeExtension.h>
 
 namespace vw {
 
@@ -102,8 +105,7 @@ namespace vw {
     max = accumulator.maximum();
   }
 
-  /// Compute the sum of all the channels of all the valid pixels of
-  /// the image.
+  /// Compute the sum of all the channels of all the valid pixels of the image.
   template <class ViewT>
   typename AccumulatorType<typename PixelChannelType<typename ViewT::pixel_type>::type>::type
   sum_of_channel_values( const ImageViewBase<ViewT>& view ) {
@@ -177,10 +179,14 @@ namespace vw {
       if ( !m_valid ) {
         m_min = m_max = arg;
         m_valid = true;
-      } else
+      } else {
         for ( size_t i = 0; i < CompoundNumChannels<ValT>::value; i++ )
-          if ( arg[i] < m_min[i] ) m_min[i] = arg[i];
-          else if ( arg[i] > m_max[i] ) m_max[i] = arg[i];
+          if ( arg[i] < m_min[i] )
+            m_min[i] = arg[i];
+          else
+            if ( arg[i] > m_max[i] )
+              m_max[i] = arg[i];
+      }
     }
 
     bool is_valid() const { return m_valid; }
@@ -245,13 +251,13 @@ namespace vw {
       VW_ASSERT(m_values[0].size(), ArgumentErr() << "MedianAccumulator: no valid samples");
       ValT result;
       for ( vw::int32 i = 0; i < CompoundNumChannels<ValT>::value; i++ ) {
-        sort( m_values[i].begin(), m_values[i].end() );
-        result[i] = m_values[i][m_values[i].size()/2];
+        result[i] = destructive_median(m_values[i]);
       }
       return result;
     }
   };
 
+  /// This class wraps another accumulator functor to add pixel mask handling.
   template <class AccumT>
   class PixelAccumulator : public AccumT {
   public:
@@ -265,7 +271,8 @@ namespace vw {
   // Functions
 
   template <class ViewT>
-  typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
+  typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                        typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
   min_pixel_value( ImageViewBase<ViewT> const& view ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
     PixelAccumulator<EWMinMaxAccumulator<accum_type> > accumulator;
@@ -274,13 +281,15 @@ namespace vw {
   }
 
   template <class ViewT>
-    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename PixelChannelType<typename ViewT::pixel_type>::type>::type
+    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                           typename PixelChannelType<typename ViewT::pixel_type>::type>::type
   min_pixel_value( ImageViewBase<ViewT> const& view ) {
     return min_channel_value( view );
   }
 
   template <class ViewT>
-    typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
+    typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                          typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
   max_pixel_value( ImageViewBase<ViewT> const& view ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
     PixelAccumulator<EWMinMaxAccumulator<accum_type> > accumulator;
@@ -290,15 +299,17 @@ namespace vw {
   }
 
   template <class ViewT>
-    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename PixelChannelType<typename ViewT::pixel_type>::type>::type
+    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                           typename PixelChannelType<typename ViewT::pixel_type>::type>::type
   max_pixel_value( ImageViewBase<ViewT> const& view ) {
     return max_channel_value( view );
   }
 
   template <class ViewT>
   void min_max_pixel_values( ImageViewBase<ViewT> const& view,
-                             typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>, typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type &min,
-                             typename UnmaskedPixelType<typename ViewT::pixel_type>::type &max ) {
+                             typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>, 
+                             typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type &min,
+                             typename UnmaskedPixelType<typename ViewT::pixel_type>::type        &max ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
     PixelAccumulator<EWMinMaxAccumulator<accum_type> > accumulator;
     for_each_pixel( view, accumulator );
@@ -308,16 +319,19 @@ namespace vw {
 
   template <class ViewT>
   void min_max_pixel_values( ImageViewBase<ViewT> const& view,
-                             typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>, typename PixelChannelType<typename ViewT::pixel_type>::type>::type &min,
-                             typename PixelChannelType<typename ViewT::pixel_type>::type &max ) {
+                             typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>, 
+                             typename PixelChannelType<typename ViewT::pixel_type>::type>::type &min,
+                             typename PixelChannelType<typename ViewT::pixel_type>::type        &max ) {
     min_max_channel_values( view, min, max );
   }
 
   /// Compute the sum of all valid pixels in the image.
   template <class ViewT>
-  typename PixelChannelCast<typename UnmaskedPixelType<typename ViewT::pixel_type>::type,typename AccumulatorType<typename PixelChannelType<typename ViewT::pixel_type>::type>::type>::type
+  typename PixelChannelCast<typename UnmaskedPixelType<typename ViewT::pixel_type>::type,
+                            typename AccumulatorType<typename PixelChannelType<typename ViewT::pixel_type>::type>::type>::type
   sum_of_pixel_values( const ImageViewBase<ViewT>& view ) {
-    typedef typename PixelChannelCast<typename UnmaskedPixelType<typename ViewT::pixel_type>::type,typename AccumulatorType<typename PixelChannelType<typename ViewT::pixel_type>::type>::type>::type accum_type;
+    typedef typename PixelChannelCast<typename UnmaskedPixelType<typename ViewT::pixel_type>::type,
+                          typename AccumulatorType<typename PixelChannelType<typename ViewT::pixel_type>::type>::type>::type accum_type;
     PixelAccumulator<Accumulator<accum_type> > accumulator;
     for_each_pixel( view, accumulator );
     return accumulator.value();
@@ -333,7 +347,8 @@ namespace vw {
   }
 
   template <class ViewT>
-  typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
+  typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                        typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
   stddev_pixel_value( ImageViewBase<ViewT> const& view ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
     PixelAccumulator<EWStdDevAccumulator<accum_type> > accumulator;
@@ -348,7 +363,8 @@ namespace vw {
   }
 
   template <class ViewT>
-    typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
+    typename boost::enable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                          typename UnmaskedPixelType<typename ViewT::pixel_type>::type>::type
   median_pixel_value( ImageViewBase<ViewT> const& view ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
     PixelAccumulator<EWMedianAccumulator<accum_type> > accumulator;
@@ -357,7 +373,8 @@ namespace vw {
   }
 
   template <class ViewT>
-    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,typename PixelChannelType<typename ViewT::pixel_type>::type>::type
+    typename boost::disable_if< IsCompound<typename UnmaskedPixelType<typename ViewT::pixel_type>::type>,
+                                           typename PixelChannelType<typename ViewT::pixel_type>::type>::type
   median_pixel_value( ImageViewBase<ViewT> const& view ) {
     return median_channel_value( view );
   }
@@ -394,35 +411,19 @@ namespace vw {
 
   // Find the histogram of an image. 
   template <class ViewT>
-  void histogram( const ImageViewBase<ViewT> &view, int num_bins, std::vector<double> &hist){
-    
-    VW_ASSERT(num_bins > 0, ArgumentErr() << "histogram: number of input bins must be positive");
-    
-    // Find the maximum and minimum
-    double max_val = -std::numeric_limits<double>::max(), min_val = -max_val;
-    for (int row = 0; row < view.impl().rows(); row++){
-      for (int col = 0; col < view.impl().cols(); col++){
-        if ( !is_valid(view.impl()(col, row)) ) continue;
-        double val = view.impl()(col, row);
-        if (val < min_val) min_val = val;
-        if (val > max_val) max_val = val;
-      }
-    }
-    if (max_val == min_val) max_val = min_val + 1.0;
-      
-    hist.assign(num_bins, 0.0);
-    for (int row = 0; row < view.impl().rows(); row++){
-      for (int col = 0; col < view.impl().cols(); col++){
-        if ( !is_valid(view.impl()(col, row)) ) continue;
-        double val = view.impl()(col, row);
-        int bin = (int)round( (num_bins - 1) * ( (val - min_val)/(max_val - min_val) ) );
-        hist[bin]++;
-      }
-    }
+  void histogram( const ImageViewBase<ViewT> &view, int num_bins, math::Histogram &hist);
 
-    return;
-  }
-  
+
+  /// Find the min and max values in an image
+  /// - TODO: Why are there two methods for doing this?
+  template <class ViewT>
+  void find_image_min_max( const ImageViewBase<ViewT> &view, double &min_val, double &max_val);
+
+  /// Overload that takes precomputed min and max values
+  template <class ViewT>
+  void histogram( const ImageViewBase<ViewT> &view, int num_bins, double min_val, double max_val,
+                  math::Histogram &hist);
+
   // Find the optimal Otsu threshold for splitting a gray scale image
   // into black and white pixels.
   // Reference: http://www.labbookpages.co.uk/software/imgProc/otsuThreshold.html
@@ -431,60 +432,135 @@ namespace vw {
   // To find its value in pixel space, you may want to compute:
   // minImageVal + threshold*(maxImageVal - minImageVal).
   template <class ViewT>
-  double optimal_threshold( const ImageViewBase<ViewT> &view){
+  double optimal_threshold( const ImageViewBase<ViewT> &view);
 
-    std::vector<double> hist;
-    int num_bins = 256;
-    histogram(view, num_bins, hist);
+  /// Converts a single channel image into a uint8 image with percentile based intensity scaling.
+  template <class ViewT>
+  void percentile_scale_convert(ImageViewBase<ViewT> const& input_image,
+                                ImageView<vw::uint8> &output_image,
+                                double low_percentile=0.02, double high_percentile=0.98,
+                                int num_bins=256);
 
-    double sum = 0.0;
-    for (size_t i = 0; i < hist.size(); i++) sum += hist[i];
-    if (sum == 0.0) return 0.0;
+  /// Converts a single channel image into a uint8 image using a simple stretch between the min and max values.
+  template <class ViewT>
+  void u8_convert(ImageViewBase<ViewT> const& input_image, ImageView<PixelGray<vw::uint8> > &output_image) {
+    // First get the min and max values
+    double min_val, max_val;
+    find_image_min_max(input_image, min_val, max_val);
 
-    // Normalize the histogram
-    for (size_t i = 0; i < hist.size(); i++) hist[i] /= sum;
-    sum = 1.0;
-    
-    double totalAccum = 0.0;
-    for (size_t i = 0; i < hist.size(); i++) totalAccum += i*hist[i];
-
-    // Find the variance between classes
-    std::vector<double> V;
-    V.assign(num_bins, 0.0);
-
-    double leftProb = 0.0, leftAccum = 0.0, rightProb = 0.0, rightAccum = 0.0;
-    for (size_t i = 0; i < hist.size(); i++){
-
-      leftProb  += hist[i];
-      leftAccum += i*hist[i];
-
-      rightProb  = sum - leftProb;
-      rightAccum = totalAccum - leftAccum;
-
-      if (leftProb == 0 || rightProb == 0.0) continue;
-      
-      double leftMean = leftAccum/leftProb;
-      double rightMean = rightAccum/rightProb;
-      V[i] = leftProb*rightProb*(leftMean-rightMean)*(leftMean-rightMean);
-      
-    }
-
-    double maxV = *std::max_element(V.begin(), V.end());
-
-    // If the maximum is reached at more than one index, find the average index
-    double indexSum = 0, numIndices = 0;
-    for (size_t i = 0; i < V.size(); i++){
-      if (V[i] == maxV){
-        indexSum += i;
-        numIndices++;
-      }
-    }
-    double meanIndex = indexSum/numIndices;
-
-    // Normalize the value
-    return meanIndex/(num_bins - 1.0);
+    // Scale the image using the computed values and convert to uint8
+    output_image = pixel_cast<vw::uint8>(normalize( clamp(input_image, min_val, max_val),
+                                                    min_val, max_val, 0.0, 255.0 ));
   }
+
+
+  // TODO: Does this already exist somewhere in the code?
+  /// An adapter to let a functor handle a single channel image mask.
+  template <class AccumT>
+  class SingleChannelAccumulator {
+    AccumT * m_functor;
+  public:
+    
+    SingleChannelAccumulator(AccumT* ptr) : m_functor(ptr) {}
+    
+    template <class ArgT>
+    void operator()( ArgT const& pix ) {
+      if ( is_valid(pix) )
+        m_functor->operator()(remove_mask(pix));
+    }
+  };
+
+  // TODO: Replace!
+  template <typename T>
+  struct PixelCollector {
+    std::vector<T> m_vec;
+    
+    void operator()(T p) {
+      m_vec.push_back(p);
+    }
+  };
   
+  /// Thread safe functor to accumulate CDF results on multiple single channel images.
+  /// - A CDF is computed for each image and they are then merged together.
+  template<typename T>
+  class ParallelCdfFunctor {
+
+    typedef vw::math::CDFAccumulator<T> CdfType;
+
+    CdfType * m_cdf_ptr;
+    int m_subsample_amt;
+    Mutex  m_mutex;
+
+  public:
+
+    /// Constructor takes a pointer to the CDF object that will be populated.
+    ParallelCdfFunctor(CdfType* ptr, int subsample_amt=1)
+      : m_cdf_ptr(ptr), m_subsample_amt(subsample_amt) {}
+
+    /// Process an image and incorporate it into the input CDF object.
+    template <class ImageT>
+    void operator()(ImageView<ImageT> const& image, BBox2i const& bbox) {
+
+      // Compute a CDF on just this input image.
+      //CdfType local_cdf(1000, 20);
+      //SingleChannelAccumulator<CdfType> accumulator(&local_cdf);
+
+      // TODO: The CDF class cannot merge properly, so use this alternative
+      //       method until it is fixed!
+      typedef PixelCollector<float> PC; // TODO: Fix type!
+      PC pixel_accum;
+      float est_num_pixels = (image.rows()/m_subsample_amt)*(image.cols()/m_subsample_amt);
+      pixel_accum.m_vec.reserve(int(est_num_pixels * 1.2));
+      SingleChannelAccumulator<PC> accumulator(&pixel_accum);
+      for_each_pixel( subsample( edge_extend(image, ConstantEdgeExtension()),
+                                 m_subsample_amt ),
+                      accumulator);
+
+      // Merge the local CDF with the main CDF.
+      m_mutex.lock();
+      /*
+      std::cout << "\nBLOCK val =";
+      std::cout << "\nval = " << local_cdf.quantile(0);
+      std::cout << "\nval = " << local_cdf.quantile(1); // Max
+      std::cout << "\nval = " << local_cdf.approximate_mean();
+      std::cout << "\nval = " << local_cdf.approximate_stddev();
+      std::cout << "\nval = " << local_cdf.quantile(0.02); // Percentile values
+      std::cout << "\nval = " << local_cdf.quantile(0.98) << std::endl;
+      */
+      //m_cdf_ptr->operator()(local_cdf);  // TODO: Fix this!
+      for (size_t i=0; i<pixel_accum.m_vec.size(); ++i)
+        m_cdf_ptr->operator()(pixel_accum.m_vec[i]);
+      /*
+      std::cout << "\nNEW val =";
+      std::cout << "\nval = " << m_cdf_ptr->quantile(0);
+      std::cout << "\nval = " << m_cdf_ptr->quantile(1); // Max
+      std::cout << "\nval = " << m_cdf_ptr->approximate_mean();
+      std::cout << "\nval = " << m_cdf_ptr->approximate_stddev();
+      std::cout << "\nval = " << m_cdf_ptr->quantile(0.02); // Percentile values
+      std::cout << "\nval = " << m_cdf_ptr->quantile(0.98) << std::endl;*/
+      m_mutex.unlock();
+    }
+  }; // End class ParallelCdfFunctor
+  
+
+  /// Compute the CDF of an image using multiple threads.
+  /// - The CDF object must be "fresh" when passed to this function.
+  /// - Consider initializing the CDFAccumulator object with a large buffer.
+  template <class ViewT>
+  void block_cdf_computation(ImageViewBase<ViewT> const& image,
+                             math::CDFAccumulator<float> &cdf,
+                             int      subsample_amt = 1,
+                             Vector2i block_size    = Vector2i(256,256)) {
+    // Set up the functor, then execute it in parallel.
+    ParallelCdfFunctor<float> cdf_functor(&cdf, subsample_amt);
+
+    // No need for a cache since each tile will be visited only once.
+    block_op(image, cdf_functor, block_size);
+  }
+
+
+#include <vw/Image/Statistics.tcc>
+
 }  // namespace vw
 
 #endif // __VW_IMAGE_STATISTICS_H__

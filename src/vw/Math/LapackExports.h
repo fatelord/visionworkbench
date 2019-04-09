@@ -22,6 +22,11 @@
 #include <vw/config.h>
 #include <vw/Core/FundamentalTypes.h>
 
+#if (defined(VW_HAVE_PKG_APPLE_LAPACK) && VW_HAVE_PKG_APPLE_LAPACK==1)
+  #include <Accelerate/Accelerate.h>
+#endif
+
+
 namespace vw {
 /// Numerical linear algebra and computational geometry.
 namespace math {
@@ -48,19 +53,23 @@ namespace math {
 #  undef P4M
    typedef MKL_INT f77_int;
 #elif (defined(VW_HAVE_PKG_APPLE_LAPACK) && VW_HAVE_PKG_APPLE_LAPACK==1)
-#  include <vecLib/clapack.h>
+//#  include <Accelerate/Accelerate.h>
    typedef __CLPK_integer f77_int;
 #else
-#  if (defined(VW_HAVE_PKG_FLAPACK)            && VW_HAVE_PKG_FLAPACK==1) || \
-      (defined(VW_HAVE_PKG_SLAPACK)            && VW_HAVE_PKG_SLAPACK==1) || \
-      (defined(VW_HAVE_PKG_STANDALONE_FLAPACK) && VW_HAVE_PKG_STANDALONE_FLAPACK==1)
+#  if (defined(VW_HAVE_PKG_FLAPACK)           ) || \
+      (defined(VW_HAVE_PKG_SLAPACK)           ) || \
+      (defined(VW_HAVE_PKG_STANDALONE_FLAPACK))
+
+    //#pragma message ( "Using Fortran based LAPACK!" )
 
     // fortran-based
     typedef int32  f77_int;
 
-#  elif (defined(VW_HAVE_PKG_CLAPACK)                    && VW_HAVE_PKG_CLAPACK==1) || \
-        (defined(VW_HAVE_PKG_STANDALONE_LAPACK_AND_BLAS) && VW_HAVE_PKG_STANDALONE_LAPACK_AND_BLAS==1) || \
-        (defined(VW_HAVE_PKG_LAPACK) && VW_HAVE_PKG_LAPACK==1)
+#  elif (defined(VW_HAVE_PKG_CLAPACK)                   ) || \
+        (defined(VW_HAVE_PKG_STANDALONE_LAPACK_AND_BLAS)) || \
+        (defined(VW_HAVE_PKG_LAPACK))
+
+    //#pragma message ( "Using C based LAPACK!" )
 
     // f2c-based
     typedef long f77_int;
@@ -84,6 +93,16 @@ namespace math {
                 f77_int *ldvl,  double  *vr,    f77_int *ldvr, double *work,
                 f77_int *lwork, f77_int *info);
 
+
+    void sgesvd_(char    *jobu,  char    *jobvt, f77_int *m,    f77_int *n,
+                 float   *a,     f77_int *lda,   float   *s,    float   *u,
+                 f77_int *ldu,   float   *vt,    f77_int *ldvt, float   *work,
+                 f77_int *lwork, f77_int *info);
+
+    void dgesvd_(char    *jobu,  char    *jobvt, f77_int *m,    f77_int *n,
+                 double  *a,     f77_int *lda,   double  *s,    double  *u,
+                 f77_int *ldu,   double  *vt,    f77_int *ldvt, double  *work,
+                 f77_int *lwork, f77_int *info);
 
     void sgesdd_(char    *jobz,  f77_int *m,    f77_int *n,    float   *a,
                  f77_int *lda,   float   *s,    float   *u,    f77_int *ldu,
@@ -165,12 +184,21 @@ namespace math {
                  f77_int *ipiv, float *b, f77_int *ldb, f77_int *info );
     void dgetrs_(char *trans, f77_int* n, f77_int *nrhs, double *a, f77_int *lda,
                  f77_int *ipiv, double *b, f77_int *ldb, f77_int *info );
-  }
+  } // end extern "C"
   } // anon namespace
 #endif
 
   void geev(char jobvl, char jobvr, f77_int n, float *a, f77_int lda, float *wr, float *wi, float *vl, f77_int ldvl, float *vr, f77_int ldvr, float *work, f77_int lwork, f77_int *info);
   void geev(char jobvl, char jobvr, f77_int n, double *a, f77_int lda, double *wr, double *wi, double *vl, f77_int ldvl, double *vr, f77_int ldvr, double *work, f77_int lwork, f77_int *info);
+
+  void gesvd(char    jobu,  char    jobvt, f77_int m,    f77_int n,
+             float   *a,     f77_int lda,   float   *s,    float   *u,
+             f77_int ldu,   float   *vt,    f77_int ldvt, float   *work,
+             f77_int lwork, f77_int *info);
+  void gesvd(char    jobu,  char    jobvt, f77_int m,    f77_int n,
+             double  *a,     f77_int lda,   double  *s,    double  *u,
+             f77_int ldu,   double  *vt,    f77_int ldvt, double  *work,
+             f77_int lwork, f77_int *info);
 
   void gesdd(char jobz, f77_int m, f77_int n, float *a, f77_int lda, float *s, float *u, f77_int ldu, float *vt, f77_int ldvt, float *work, f77_int lwork, f77_int *iwork, f77_int *info);
   void gesdd(char jobz, f77_int m, f77_int n, double *a, f77_int lda, double *s, double *u, f77_int ldu, double *vt, f77_int ldvt, double *work, f77_int lwork, f77_int *iwork, f77_int *info);
@@ -212,3 +240,4 @@ namespace math {
 
 
 #endif
+

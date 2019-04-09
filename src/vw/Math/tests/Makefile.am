@@ -32,9 +32,11 @@ TestNelderMead_SOURCES                = TestNelderMead.cxx
 TestKDTree_SOURCES                    = TestKDTree.cxx
 TestEuler_SOURCES                     = TestEuler.cxx
 TestParticleSwarmOptimization_SOURCES = TestParticleSwarmOptimization.cxx
-TestAccumulators_SOURCES              = TestAccumulators.cxx
+TestStatistics_SOURCES                = TestStatistics.cxx
 TestMatrixSparseSkyline_SOURCES       = TestMatrixSparseSkyline.cxx
 TestConjugateGradient_SOURCES         = TestConjugateGradient.cxx
+TestFLANNTree_SOURCES                 = TestFLANNTree.cxx
+TestGaussianClustering_SOURCES        = TestGaussianClustering.cxx
 
 if HAVE_PKG_LAPACK
 
@@ -48,8 +50,9 @@ endif
 
 TESTS = TestVector TestMatrix TestQuaternion TestBBox TestFunctions     \
         TestFunctors TestNelderMead TestKDTree $(TestLinearAlgebra)     \
-        TestEuler TestParticleSwarmOptimization TestAccumulators        \
-        TestMatrixSparseSkyline TestConjugateGradient
+        TestEuler TestParticleSwarmOptimization TestStatistics          \
+        TestMatrixSparseSkyline TestConjugateGradient TestFLANNTree     \
+        TestGaussianClustering
 
 #include $(top_srcdir)/config/instantiate.am
 

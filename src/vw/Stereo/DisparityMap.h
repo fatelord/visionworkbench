@@ -24,6 +24,7 @@
 #include <vw/Math/BBox.h>
 #include <vw/Math/Vector.h>
 #include <vw/Math/Matrix.h>
+#include <vw/Math/Statistics.h>
 #include <vw/Image/PixelTypes.h>
 #include <vw/Image/ImageView.h>
 #include <vw/Image/PerPixelViews.h>
@@ -41,18 +42,11 @@
 
 namespace vw {
 
-  // Registering the Pixel Disparity type for FileIO
-  template<> struct PixelFormatID<PixelMask<Vector2f> > { static const PixelFormatEnum value = VW_PIXEL_GENERIC_3_CHANNEL; };
-  template<> struct PixelFormatID<PixelMask<Vector2> > { static const PixelFormatEnum value = VW_PIXEL_GENERIC_3_CHANNEL; };
-  template<> struct PixelFormatID<Vector2> { static const PixelFormatEnum value = VW_PIXEL_GENERIC_2_CHANNEL; };
-  template<> struct PixelFormatID<PixelMask<Vector2i> > { static const PixelFormatEnum value = VW_PIXEL_GENERIC_3_CHANNEL; };
-  template<> struct PixelFormatID<Vector2i> { static const PixelFormatEnum value = VW_PIXEL_GENERIC_2_CHANNEL; };
-
 namespace stereo {
 
   //  get_disparity_range()
   //
-  // Determine the range of disparity values present in the disparity map.
+  /// Determine the range of disparity values present in the disparity map.
   template <class ViewT>
   BBox2f get_disparity_range(ImageViewBase<ViewT> const& disparity_map ) {
     typedef typename UnmaskedPixelType<typename ViewT::pixel_type>::type accum_type;
@@ -87,20 +81,20 @@ namespace stereo {
     return per_pixel_filter(image.impl(), MissingPixelImageFunc<typename ViewT::pixel_type>());
   }
 
-  //  disparity_mask()
-  //
-  //  ......formerly mask()
-  //
+  ///  disparity_mask()
+  ///
+  ///  ......formerly mask()
+  ///
   /// Given a pair of masks for the left and right images and a
   /// disparity map to be masked, this view will eliminate any pixels
   /// in the disparity map that correspond to locations in the mask
   /// that contain a value of zero.
   template <class ViewT, class MaskView1T, class MaskView2T>
   class DisparityMaskView : public ImageViewBase<DisparityMaskView<ViewT, MaskView1T, MaskView2T> > {
-    ViewT m_input_view;
+    ViewT      m_input_view;
     MaskView1T m_mask1_view;
     MaskView2T m_mask2_view;
-    BBox2i m_search_range;
+    BBox2i     m_search_range;
 
     template <class MaskPT>
     bool has_valid_mask( ImageView<MaskPT> const& mask ) const {
@@ -124,7 +118,7 @@ namespace stereo {
     typedef typename ViewT::pixel_type result_type;
     typedef ProceduralPixelAccessor<DisparityMaskView> pixel_accessor;
 
-    DisparityMaskView( ImageViewBase<ViewT> const& image,
+    DisparityMaskView( ImageViewBase<ViewT>      const& image,
                        ImageViewBase<MaskView1T> const& mask1,
                        ImageViewBase<MaskView2T> const& mask2,
                        BBox2i const& search_range = BBox2i() ) :
@@ -135,8 +129,8 @@ namespace stereo {
     }
 
     // Standard required ImageView interface
-    inline int32 cols() const { return m_input_view.cols(); }
-    inline int32 rows() const { return m_input_view.rows(); }
+    inline int32 cols  () const { return m_input_view.cols  (); }
+    inline int32 rows  () const { return m_input_view.rows  (); }
     inline int32 planes() const { return m_input_view.planes(); }
 
     inline pixel_accessor origin() const { return pixel_accessor( *this, 0, 0 ); }
@@ -162,12 +156,14 @@ namespace stereo {
       return disparity;
     }
 
-    // Block rasterization section that does actual work
-    typedef DisparityMaskView<CropView<ImageView<typename ViewT::pixel_type> >, CropView<ImageView<typename MaskView1T::pixel_type> >, CropView<ImageView<typename MaskView2T::pixel_type> > > prerasterize_type;
+    /// Block rasterization section that does actual work
+    typedef DisparityMaskView<CropView<ImageView<typename     ViewT::pixel_type > >, 
+                              CropView<ImageView<typename MaskView1T::pixel_type> >, 
+                              CropView<ImageView<typename MaskView2T::pixel_type> > > prerasterize_type;
     inline prerasterize_type prerasterize(BBox2i const& bbox) const {
       typedef typename MaskView1T::pixel_type Mask1PT;
       typedef typename MaskView2T::pixel_type Mask2PT;
-      typedef typename ViewT::pixel_type ViewPT;
+      typedef typename ViewT::pixel_type      ViewPT;
 
       // Prerasterize Mask1 as we'll always be using it. I'm not using
       // the prerasterize type as I want to make sure I can write to
@@ -198,8 +194,7 @@ namespace stereo {
                 m_mask2_view.cols(), m_mask2_view.rows() );
         if ( !has_valid_mask(mask2_preraster.child()) ) {
           // It appears the right mask is completely empty. In order
-          // to make this view early exit, we'll set the left mask to
-          // entire zero.
+          // to make this view early exit, we'll set the left mask to entire zero.
           fill( mask1_preraster.child(), Mask1PT() );
           return prerasterize_type( crop(ImageView<ViewPT>(0,0),0,0,cols(),rows()),
                                     mask1_preraster,
@@ -230,8 +225,7 @@ namespace stereo {
                        bbox.max() + ceil(Vector2f(input_max[0],input_max[1])) );
       preraster.crop( bounding_box( m_mask2_view ) );
       // The bottom might be a little confusing. We're rasterizing the
-      // part of mask2 that we know the input disparity will actually
-      // touch.
+      // part of mask2 that we know the input disparity will actually touch.
       return prerasterize_type( disp_preraster,
                                 mask1_preraster,
                                 crop( ImageView<Mask2PT>( crop(m_mask2_view,preraster) ),
@@ -246,7 +240,7 @@ namespace stereo {
 
   template <class ViewT, class MaskView1T, class MaskView2T>
   DisparityMaskView<ViewT, MaskView1T, MaskView2T>
-  disparity_mask( ImageViewBase<ViewT> const& disparity_map,
+  disparity_mask( ImageViewBase<ViewT>      const& disparity_map,
                   ImageViewBase<MaskView1T> const& left_mask,
                   ImageViewBase<MaskView2T> const& right_mask,
                   BBox2i const& search_range = BBox2i() ) {
@@ -300,6 +294,9 @@ namespace stereo {
                       func_type( min, max) );
   }
 
+  // ================================================================================
+  // Start of outlier removal functions.
+
 
   /// Remove outliers from a disparity map image.
 
@@ -307,8 +304,7 @@ namespace stereo {
   /// You supply the half dimensions of the kernel window.
   ///
   /// Next, you supply the threshold that determines whether a
-  /// pixel is considered "close" to its neightbors (in units of
-  /// pixels).
+  /// pixel is considered "close" to its neightbors (in units of pixels).
   ///
   /// Finally, you supply the percentage of the pixels within the kernel
   /// that must "match" the center pixel if that pixel is to be
@@ -343,16 +339,17 @@ namespace stereo {
                 ArgumentErr() << "RmOutliersFunc: half kernel sizes must be non-zero.");
     }
 
-    int32 half_h_kernel() const { return m_half_h_kernel; }
-    int32 half_v_kernel() const { return m_half_v_kernel; }
-    double rejection_threshold() const { return m_rejection_threshold; }
-    double pixel_threshold() const { return m_pixel_threshold; }
-    int32 rejected_points() const { return m_state->rejected_points; }
-    int32 total_points() const { return m_state->total_points; }
+    int32  half_h_kernel      () const { return m_half_h_kernel;          }
+    int32  half_v_kernel      () const { return m_half_v_kernel;          }
+    double rejection_threshold() const { return m_rejection_threshold;    }
+    double pixel_threshold    () const { return m_pixel_threshold;        }
+    int32  rejected_points    () const { return m_state->rejected_points; }
+    int32  total_points       () const { return m_state->total_points;    }
 
     BBox2i work_area() const { return BBox2i(Vector2i(-m_half_h_kernel, -m_half_v_kernel),
-                                             Vector2i(m_half_h_kernel, m_half_v_kernel)); }
+                                             Vector2i( m_half_h_kernel,  m_half_v_kernel)); }
 
+    /// Returns either a copy of the input pixel (PASS) or an empty invalid pixel (FAIL)
     template <class PixelAccessorT>
     typename PixelAccessorT::pixel_type operator() (PixelAccessorT const& acc) const {
       m_state->total_points++;
@@ -395,8 +392,11 @@ namespace stereo {
     return os;
   }
 
+  /// Wrapper to apply the RmOutliersUsingThreshFunc functor to an entire image.
+  /// - Using this call takes care of inserting the required EdgeExtension view
   template <class ViewT>
-  UnaryPerPixelAccessorView<EdgeExtensionView<ViewT,ConstantEdgeExtension>, RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >
+  UnaryPerPixelAccessorView<EdgeExtensionView<ViewT,ConstantEdgeExtension>, 
+                            RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >
   rm_outliers_using_thresh(ImageViewBase<ViewT> const& disparity_map,
                            int32 half_h_kernel, int32 half_v_kernel,
                            double pixel_threshold,
@@ -408,32 +408,35 @@ namespace stereo {
                                pixel_threshold, rejection_threshold));
   }
 
+  /// Remove speckle outliers first using user specified parameters, and then
+  /// using a heuristic that isolates single pixel outliers.
+  /// - Rejection_threshold is percentage of neighbors that must be within pixel_threshold distance
+  ///   of the candidate pixel.
+  /// - This function is essentially a two-pass version of rm_outliers_using_thresh with one set of
+  ///   parameters being hard-coded.
   template <class ViewT>
   inline UnaryPerPixelAccessorView< UnaryPerPixelAccessorView<EdgeExtensionView<ViewT,ConstantEdgeExtension>,
-                                                              RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >, RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >
+                                                              RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >, 
+                                                              RmOutliersUsingThreshFunc<typename ViewT::pixel_type> >
   disparity_cleanup_using_thresh(ImageViewBase<ViewT> const& disparity_map,
                                  int32 h_half_kernel, int32 v_half_kernel,
                                  double pixel_threshold,
                                  double rejection_threshold) {
-    // Remove outliers first using user specified parameters, and then
-    // using a heuristic that isolates single pixel outliers.
-    typedef RmOutliersUsingThreshFunc<typename ViewT::pixel_type> func_type_thresh;
-    typedef UnaryPerPixelAccessorView<EdgeExtensionView<ViewT,ConstantEdgeExtension>,
-      func_type_thresh > inner_type;
-    typedef UnaryPerPixelAccessorView<inner_type,
-      func_type_thresh > outer_type;
+    typedef RmOutliersUsingThreshFunc<typename ViewT::pixel_type> func_type; // Functor definition
+    typedef UnaryPerPixelAccessorView<EdgeExtensionView<ViewT,ConstantEdgeExtension>, func_type > inner_type;
+    typedef UnaryPerPixelAccessorView<inner_type, func_type > outer_type; // Second application of func_type
     return outer_type(rm_outliers_using_thresh
-                      (disparity_map.impl(),
-                       h_half_kernel, v_half_kernel,
-                       pixel_threshold, rejection_threshold),
+                       (disparity_map.impl(),
+                        h_half_kernel, v_half_kernel,
+                        pixel_threshold, rejection_threshold
+                       ),
                       //func_type_thresh( 1, 1, 1.0, 0.75 ) // overly restrictive
                       // at least 1 neighbor must be within 3 pixels
-                      func_type_thresh( 1, 1, 3.0, 0.20 )
+                      func_type( 1, 1, 3.0, 0.20 )
                       );
   }
 
-  // Method 2: Compare the central point to the mean of the
-  // neighbors (Ara's method).
+  // Method 2: Compare the central point to the mean of the neighbors (Ara's method).
   template <class PixelT>
   class RmOutliersUsingMeanFunc : public ReturnFixedType<PixelT>{
 
@@ -1048,6 +1051,122 @@ namespace stereo {
                      func_type(transform));
   }
 
+
+
+  // Method 5: Use statistics based on a specified region.
+  // - This method has some interactions with the tiling system that can result in
+  //   large-ish valid portions of the disparity map being flagged as invalid.
+  // - More tweaking is required before this can be generally used.
+
+  /// Simple functor to accumulate two CDF functions of disparity data.
+  /// - WARNING: The CDF class only works correctly on images of a certain size.
+  template <class pixel_type>
+  struct DisparityCdfFunctor {
+  private:
+    size_t count;
+    vw::math::CDFAccumulator<float> xCdf, yCdf;
+  public:
+    DisparityCdfFunctor() : count(0) {}
+    
+    inline void operator()(pixel_type const& pix) {
+      if (!is_valid(pix))
+        return; // Skip invalid input pixels
+      xCdf(static_cast<float>(pix[0]));
+      yCdf(static_cast<float>(pix[1]));
+      ++count;
+    }
+    // The get functions protect against seg faults when () was not called.
+    // - This protection belongs in the CDFAccumulator class!
+    float getQuantileX(float quantile) const {
+      vw_out() << "Quantile count: " << count << std::endl;
+      if (count == 0)
+        return 0;
+      return xCdf.quantile(quantile);
+    }
+    float getQuantileY(float quantile) const {
+      if (count == 0)
+        return 0;
+      return yCdf.quantile(quantile);
+    }
+  };
+
+  /// Simple functor to compare disparity values to a pair of thresholds.
+  /// - Invalidates the pixel if either value is over the given threshold.
+  /// - Could generalize this if desired.
+  template <typename T>
+  struct DisparityThresholdFunctor {
+  private:
+    float xCutoff, yCutoff;
+  public:
+    typedef T result_type;
+    
+    DisparityThresholdFunctor(float x_cutoff, float y_cutoff) : xCutoff(x_cutoff), yCutoff(y_cutoff) {}
+    
+    /// Return a copy of the input pixel but invalidate it if it fails either threshold test.
+    inline result_type operator()(T const& pix) const {
+      T out = pix;
+      if ((static_cast<float>(pix[0]) > xCutoff) || (static_cast<float>(pix[1]) > yCutoff))
+        invalidate(out);
+      return out;
+    }
+
+  };
+
+  /// Wrapper to apply the DisparityCdfFunctor plus threshold functor to an entire image.
+  template <class ViewT>
+  UnaryPerPixelView<ViewT, DisparityThresholdFunctor<typename ViewT::pixel_type> >
+  rm_outliers_using_quantiles(ImageViewBase<ViewT> const& disparity_map,
+                              double quantile, double multiple) {
+                           
+    // Compute statistics on the entire input image using DisparityCdfFunctor
+    DisparityCdfFunctor<typename ViewT::pixel_type> cdf_functor;
+    for_each_pixel(disparity_map, cdf_functor); // Apply the functor to each pixel in the image
+    double max_val_x = multiple * cdf_functor.getQuantileX(quantile);
+    double max_val_y = multiple * cdf_functor.getQuantileY(quantile);
+    //vw_out() << "Computed max value X: " << max_val_x << std::endl;
+    //vw_out() << "Computed max value Y: " << max_val_y << std::endl;
+
+    // Use UnaryPerPixelView to apply the threshold functor to every image pixel 
+    typedef DisparityThresholdFunctor<typename ViewT::pixel_type> disp_thresh_functor;
+    typedef UnaryPerPixelView<ViewT, disp_thresh_functor > view_type;
+    return view_type(disparity_map.impl(), disp_thresh_functor(max_val_x, max_val_y));
+  }
+  
+template <class ViewT>
+  inline UnaryPerPixelView<ImageView<typename ViewT::pixel_type>, DisparityThresholdFunctor<typename ViewT::pixel_type> > 
+  triple_disparity_cleanup(ImageViewBase<ViewT> const& disparity_map,
+                           int32  h_half_kernel,   int32  v_half_kernel,
+                           double pixel_threshold, double rejection_threshold,
+                           double quantile,        double multiple) {
+
+    // Perform speckle filter first and rasterize results so don't need to make an extra pass through them.
+    ImageView<typename ViewT::pixel_type> temp_view = 
+          disparity_cleanup_using_thresh(disparity_map, h_half_kernel, v_half_kernel,
+                                         pixel_threshold, rejection_threshold);
+
+    // Now perform the quantile based filtering.                                         
+    return rm_outliers_using_quantiles(temp_view, quantile, multiple); 
+  }
+
+template <class ViewT>
+  inline UnaryPerPixelView<ImageView<typename ViewT::pixel_type>, DisparityThresholdFunctor<typename ViewT::pixel_type> > 
+  double_disparity_cleanup(ImageViewBase<ViewT> const& disparity_map,
+                           int32  h_half_kernel,   int32  v_half_kernel,
+                           double pixel_threshold, double rejection_threshold,
+                           double quantile,        double multiple) {
+
+    // Perform speckle filter first and rasterize results so don't need to make an extra pass through them.
+    ImageView<typename ViewT::pixel_type> temp_view = 
+          rm_outliers_using_thresh(disparity_map, h_half_kernel, v_half_kernel,
+                                         pixel_threshold, rejection_threshold);
+
+    // Now perform the quantile based filtering.                                         
+    return rm_outliers_using_quantiles(temp_view, quantile, multiple); 
+  }
+
+
+
+
   // DisparityTransform image transform functor
   //
   // Used to transform an image by using a disparity map
@@ -1155,7 +1274,7 @@ namespace stereo {
       int32 ci = i << 1; int32 cj = j << 1;
       typedef typename AccumulatorType<typename PixelChannelType<result_type>::type>::type cnt_type;
       typedef typename CompoundChannelCast<result_type, cnt_type>::type bff_type;
-      bff_type buffer = 0;
+      bff_type buffer;
       cnt_type count = 0;
       if ( is_valid( m_child(ci,cj,p) ) ) {
         count+=10; buffer += 10*bff_type(m_child(ci,cj,p));
@@ -1193,7 +1312,9 @@ namespace stereo {
 
     typedef DisparitySubsampleView<typename ImageT::prerasterize_type> prerasterize_type;
     inline prerasterize_type prerasterize( BBox2i const& bbox ) const {
-      return prerasterize_type(m_child.prerasterize(bbox)); }
+      BBox2i expanded_bbox = 2*bbox;
+      expanded_bbox.expand(1);
+      return prerasterize_type(m_child.prerasterize(expanded_bbox)); }
     template <class DestT>
     inline void rasterize( DestT const& dest, BBox2i const& bbox ) const {
       vw::rasterize( prerasterize(bbox), dest, bbox );

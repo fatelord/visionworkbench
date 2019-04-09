@@ -105,8 +105,21 @@ namespace ip {
 
     std::ifstream f;
     f.open(ip_file.c_str(), std::ios::binary | std::ios::in);
+    if ( !f.is_open() )
+      vw_throw( IOErr() << "Failed to open \"" << ip_file << "\" as VWIP file." );
 
-    // Error Handling
+    uint64 size;
+    f.read((char*)&size, sizeof(uint64));
+    for (size_t i = 0; i < size; ++i)
+      result.push_back( read_ip_record(f) );
+    f.close();
+    return result;
+  }
+  InterestPointList read_binary_ip_file_list(std::string ip_file) {
+    InterestPointList result;
+
+    std::ifstream f;
+    f.open(ip_file.c_str(), std::ios::binary | std::ios::in);
     if ( !f.is_open() )
       vw_throw( IOErr() << "Failed to open \"" << ip_file << "\" as VWIP file." );
 
@@ -144,7 +157,7 @@ namespace ip {
 
     // Error Handling
     if ( !f.is_open() )
-      vw_throw( IOErr() << "Failed to open \"" << match_file << "\" as Match file." );
+      vw_throw( IOErr() << "Failed to open match file: " << match_file );
 
     uint64 size1, size2;
     f.read((char*)&size1, sizeof(uint64));
@@ -165,9 +178,8 @@ namespace ip {
     }
     return result;
   }
-
-  // You are highly discouraged in using this as all descriptor
-  // information is lost.
+/*
+  // You are highly discouraged in using this as all descriptor information is lost.
   std::vector<InterestPoint> vectorlist_to_iplist(std::vector<Vector3> const& veclist) {
     std::vector<InterestPoint> result(veclist.size());
     for (size_t i=0; i < veclist.size(); ++i) {
@@ -176,7 +188,7 @@ namespace ip {
     }
     return result;
   }
-
+*/
   /// Helpful functors
   void remove_descriptor( InterestPoint & ip ) { ip.descriptor.set_size(0); }
 

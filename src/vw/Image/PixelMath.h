@@ -29,6 +29,7 @@
 #include <vw/Core/Functors.h>
 #include <vw/Math/Functors.h>
 
+
 namespace vw {
 
   // *******************************************************************
@@ -45,7 +46,7 @@ namespace vw {
   template <class DerivedT>
   class PixelMathBase {
   public:
-    DerivedT& impl() { return static_cast<DerivedT&>(*this); }
+    DerivedT      & impl()       { return static_cast<DerivedT      &>(*this); }
     DerivedT const& impl() const { return static_cast<DerivedT const&>(*this); }
   };
 

@@ -44,9 +44,7 @@ namespace camera {
   /// is the +z unit vector, and the image plane is aligned such that the
   /// positive x-pixel direction (increasing image columns) is the camera frame's
   /// +x vector, and the positive y-pixel direction (increasing image
-  /// rows) is the frame's -y vector.  Note that this discrepancy in y
-  /// frames is due to the fact that images stored in memory are most
-  /// naturally indexed starting in the upper left hand corner.
+  /// rows) is the frame's y vector.
   ///
   /// --->The user can re-define the direction of increasing x-pixel,
   ///     increasing y-pixel, and pointing vector by specifying
@@ -57,16 +55,13 @@ namespace camera {
   ///
   /// The INTRINSIC portion of the camera matrix is nominally stored as
   ///
-  ///    [  fx   0   cx  ]
-  /// K= [  0   -fy  cy  ]
-  ///    [  0    0   1   ]
+  ///    [  fx   0    cx  ]
+  /// K= [  0    fy   cy  ]
+  ///    [  0    0    1   ]
   ///
   /// with fx, fy the focal length of the system (in horizontal and
   /// vertical pixels), and (cx, cy) the pixel offset of the
-  /// principal point of the camera on the image plane. --Note that
-  /// the default v direction is <0,-1,0>, so
-  /// K will be create with a POSITIVE fy term in the center; it
-  /// becomes negative when multiplied with the v_direction vector).
+  /// principal point of the camera on the image plane.
   ///
   /// Combining both the intrinsic camera matrix K with the
   /// extrinsic matrices, (u,v,w rotation, R and C) we see that a real-world point (x,
@@ -81,11 +76,11 @@ namespace camera {
   /// rotate and translate a vector in world coordinates into camera coordinates.
   ///
   ///
-  ///  The Tsai distortion model describes radial and tangential lens distortion. See below.
+  ///  Lens distortion models can be found in the file LensDistortion.h
   ///
 
   class PinholeModel : public CameraModel {
-    typedef boost::shared_ptr<const LensDistortion> DistortPtr;
+    typedef boost::shared_ptr<LensDistortion> DistortPtr;
 
     DistortPtr m_distortion;
     Matrix<double,3,4> m_camera_matrix;
@@ -96,7 +91,8 @@ namespace camera {
     Matrix<double,3,3> m_intrinsics;
     Matrix<double,3,4> m_extrinsics;
 
-    // Intrinsic parameters, in pixel units
+    /// Intrinsic parameters, in pixel units
+    /// Focal length in u and v, 
     double m_fu, m_fv, m_cu, m_cv;
 
     // Vectors that define how the coordinate system of the camera
@@ -108,11 +104,14 @@ namespace camera {
 
     // Pixel Pitch, if the above units were not in pixels this should
     // convert it to that. For example, if distortion and focal length
-    // have been described in mm. Pixel pitch would then be described
-    // in mm/px.
+    // have been described in mm. Pixel pitch would then be described in mm/px.
+    // - To clarify, if the above units are given in pixels this should equal to 1.0.
+    // - It is kind of anoying that m_cu and m_cv must be in the same units as 
+    //   all the numbers in the lens distortion parameters.
     double m_pixel_pitch;
+    
 
-    // Cached values for pixel_to_vector
+    /// Cached values for pixel_to_vector
     Matrix<double,3,3> m_inv_camera_transform;
 
   public:
@@ -125,6 +124,9 @@ namespace camera {
 
     /// Initialize from a file on disk.
     PinholeModel(std::string const& filename);
+
+    /// Copy constructor
+    PinholeModel(PinholeModel const& other);
 
     /// Initialize the pinhole model with explicit parameters.
     ///
@@ -153,7 +155,8 @@ namespace camera {
                  double f_u, double f_v, double c_u, double c_v,
                  Vector3 u_direction, Vector3 v_direction,
                  Vector3 w_direction,
-                 LensDistortion const& distortion_model);
+                 LensDistortion const* distortion_model = 0,
+                 double pixel_pitch = 1.0);
 
     /// Initialize the pinhole model with explicit parameters.
     ///
@@ -169,7 +172,7 @@ namespace camera {
     /// constructor:
     ///
     ///   +u (increasing image columns)                     =  +X   [1 0 0]
-    ///   +v (increasing image rows)                        =  +Y   [0 -1 0]
+    ///   +v (increasing image rows)                        =  +Y   [0 1 0]
     ///   +w (complete the RH coordinate system with
     ///       u and v -- points into the image)             =  +Z   [0 0 1]
     ///
@@ -183,25 +186,16 @@ namespace camera {
     ///
     PinholeModel(Vector3 camera_center, Matrix<double,3,3> rotation,
                  double f_u, double f_v, double c_u, double c_v,
-                 LensDistortion const& distortion_model);
+                 LensDistortion const* distortion_model = 0,
+                 double pixel_pitch = 1.0);
 
-    /// Construct a basic pinhole model with no lens distortion
-    PinholeModel(Vector3 camera_center, Matrix<double,3,3> rotation,
-                 double f_u, double f_v,
-                 double c_u, double c_v);
-
-    virtual std::string type() const;
-    virtual ~PinholeModel();
+    virtual std::string type() const { return "Pinhole"; }
+    virtual ~PinholeModel() {}
 
     /// Read / Write a pinhole model from a file on disk.
-    /// Files will end in format .pinhole
-    void read(std::string const& filename);
+    /// - Supported file formats are .pinhole, .tsai
+    void read (std::string const& filename);
     void write(std::string const& filename) const;
-
-    /// DEPRECATED FILE IO
-    void read_file(std::string const& filename) VW_DEPRECATED;
-    void write_file(std::string const& filename) const VW_DEPRECATED;
-    void read_old_file(std::string const& filename) VW_DEPRECATED;
 
     //------------------------------------------------------------------
     // Methods
@@ -212,6 +206,12 @@ namespace camera {
     //  point appears in the image.
     virtual Vector2 point_to_pixel(Vector3 const& point) const;
 
+    /// Skips the pixel_to_vector call used for a sanity check in point_to_pixel.
+    Vector2 point_to_pixel_no_check(Vector3 const& point) const;
+
+    /// As point_to_pixel, but ignoring any lens distortion.
+    Vector2 point_to_pixel_no_distortion(Vector3 const& point) const;
+
     // Is a valid projection of point is possible?
     // This is equal to: Is the point in front of the camera (z > 0)
     // after extinsic transformation?
@@ -221,14 +221,20 @@ namespace camera {
     //  through the position of the pixel 'pix' on the image plane.
     virtual Vector3 pixel_to_vector (Vector2 const& pix) const;
 
+    // The pinhole camera position does not vary by pixel so the input pixel is ignored.
     virtual Vector3 camera_center(Vector2 const& /*pix*/ = Vector2() ) const;
     void set_camera_center(Vector3 const& position);
 
     // Pose is a rotation which moves a vector in camera coordinates
     // into world coordinates.
+    // - The pinhole camera position does not vary by pixel so the input pixel is ignored.
     virtual Quaternion<double> camera_pose(Vector2 const& /*pix*/ = Vector2() ) const;
     void set_camera_pose(Quaternion<double> const& pose);
     void set_camera_pose(Matrix<double,3,3> const& pose);
+    
+    // WARNING: There may be a bug copying pose between cameras so use this function
+    //           instead of camera_pose() for copies until it is resolved!
+    Matrix<double,3,3> const& get_rotation_matrix() const {return m_rotation;}
 
     //  u_direction, v_direction, and w_direction define how the coordinate
     //  system of the camera relate to the directions in the image:
@@ -245,24 +251,23 @@ namespace camera {
     Vector3 coordinate_frame_v_direction() const;
     Vector3 coordinate_frame_w_direction() const;
 
-    const LensDistortion* lens_distortion() const;
-    void set_lens_distortion(LensDistortion const& distortion);
+    LensDistortion const* lens_distortion() const;
+    void set_lens_distortion(LensDistortion const* distortion); // Makes a copy
 
     //  f_u and f_v :  focal length in horiz and vert. pixel units
     //  c_u and c_v :  principal point in pixel units
     void intrinsic_parameters(double& f_u, double& f_v,
-                              double& c_u, double& c_v) const VW_DEPRECATED;
+                              double& c_u, double& c_v) const;
     void set_intrinsic_parameters(double f_u, double f_v,
-                                  double c_u, double c_v) VW_DEPRECATED;
+                                  double c_u, double c_v);
 
     Vector2 focal_length() const;
-    void set_focal_length(Vector2 const& f, bool rebuild=true );
-
     Vector2 point_offset() const;
+    double  pixel_pitch () const;
+    
+    void set_focal_length(Vector2 const& f, bool rebuild=true );
     void set_point_offset(Vector2 const& c, bool rebuild=true );
-
-    double pixel_pitch() const;
-    void set_pixel_pitch( double pitch );
+    void set_pixel_pitch (double pitch);
 
     // Ingest camera matrix
     // This performs a camera matrix decomposition and rewrites most variables
@@ -270,25 +275,40 @@ namespace camera {
 
     Matrix<double,3,4> camera_matrix() const;
 
+    // Apply a given rotation + translation + scale transform to a pinhole camera
+    void apply_transform(vw::Matrix3x3 const & rotation,
+                         vw::Vector3   const & translation,
+                         double                scale);
   private:
     /// This must be called whenever camera parameters are modified.
     void rebuild_camera_matrix();
+    
+    /// Initialize m_distortion with the correct type of lens distortion
+    ///  model depending on a string from an input .tsai file.
+    /// - Returns true if it found a name or false if it did not and
+    ///   just created the default TSAI distortion model.
+    bool construct_lens_distortion(std::string const& config_line, int camera_version);
   };
 
-  //   /// Given two pinhole camera models, this method returns two new camera
-  //   /// models that have been epipolar rectified.
-  //   template <>
-  //   void epipolar(PinholeModel<NoLensDistortion> const& src_camera0,
-  //                 PinholeModel<NoLensDistortion> const& src_camera1,
-  //                 PinholeModel<NoLensDistortion> &dst_camera0,
-  //                 PinholeModel<NoLensDistortion> &dst_camera1);
+  // TODO: Any use for an epipolar alignment function that operates on pinhole cameras?
 
-  PinholeModel scale_camera(PinholeModel const& camera_model,
-                            float scale);
-  PinholeModel linearize_camera(PinholeModel const& camera_model);
+  /// Used to modify camera in the event to user resizes the image
+  /// - Under the hood all this does is change the pixel pitch.
+  PinholeModel scale_camera(PinholeModel const& camera_model, double scale);
+                            
+  /// Returns a copy of the camera model with no lens distortion.
+  /// - This does not account for the distortion in any way, 
+  ///   it just removes the distortion model!
+  PinholeModel strip_lens_distortion(PinholeModel const& camera_model);
 
+  /// From a pair of input pinhole cameras, produce a pair of associated
+  ///  zero-distortion epipolar aligned cameras which can be used for stereo.
+  void epipolar(PinholeModel const &src_camera0, PinholeModel const &src_camera1,
+                PinholeModel       &dst_camera0, PinholeModel       &dst_camera1);
+
+  /// Write a description of a PinholeModel to the stream.
   std::ostream& operator<<(std::ostream& str, PinholeModel const& model);
 
 }}      // namespace vw::camera
 
-#endif  //__CAMERAMODEL_CAHV_H__
+#endif  //__CAMERAMODEL_PINHOLE_H__

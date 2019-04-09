@@ -54,6 +54,25 @@ TEST( Matcher, DistanceMetric ) {
 
   RelativeEntropyMetric metric2;
   EXPECT_NEAR(metric2(ip1, ip2), -2.321, 1e-3);
+
+  HammingMetric metric3;
+  ip1.descriptor = Vector3(1,2,3); // Bit distance is 1, 1, 2 --> Total = 4
+  ip2.descriptor = Vector3(0,0,0);
+  EXPECT_NEAR(metric3(ip1, ip2), 4, 1e-3);
+  
+  Vector<float> data, zeros;
+  data.set_size(15);
+  zeros.set_size(15);
+  size_t k=0;
+  for (int i=0; i<5; ++i) {
+    data[k++] = 1;
+    data[k++] = 2;
+    data[k++] = 3;
+  } 
+  zeros.set_all(0);
+  ip1.descriptor = data; // Bit distance 4*5 = 20
+  ip2.descriptor = zeros;
+  EXPECT_NEAR(metric3(ip1, ip2), 20, 1e-3);
 }
 
 TEST( Matcher, Constraints ) {

@@ -65,13 +65,13 @@ namespace vw {
     ~KMLFile(); // Closes file out
 
     // Access internal
-    std::string filename() const { return m_filename; }
-    std::string name() const { return m_name; }
+    std::string filename () const { return m_filename;  }
+    std::string name     () const { return m_name;      }
     std::string directory() const { return m_directory; }
 
     // Lower Level Writing Functions
-    void open_bracket( std::string name );
-    void close_bracket();
+    void open_bracket  ( std::string name );
+    void close_bracket ();
     void close_brackets( int );
     void close_all_brackets();
 
@@ -79,12 +79,21 @@ namespace vw {
     void enter_folder( std::string name="",
                        std::string description="" );
     void exit_folder();
+    
+    /// Add a single placemark to the KML file
     void append_placemark( double lon, double lat,
                            std::string name="",
                            std::string description="",
                            std::string style="",
                            double altitude=0,
                            bool extrude=false );
+                           
+    /// Add a line segment to the KML file
+    void append_line( std::vector<Vector3> coordinates,
+                      std::string name="",
+                      std::string style="");
+                           
+    /// Add a 3d model to the KML file
     void append_model( std::string path_to_model,
                        double lon, double lat,
                        vw::Quaternion<double> pose,
@@ -92,13 +101,28 @@ namespace vw {
                        std::string description,
                        double altitude,
                        double scale );
+                       
+    /// LatLonAltBox: This is a bounding box, that only displays contents
+    /// when viewer is inside box.
     void append_latlonaltbox( float north,
                               float south,
                               float east,
                               float west );
+                              
+    /// Lod: This sets the min max pixel viewing range for an object
     void append_lod( float min, float max );
+    
+    /// Style: Defines an Icon to use later
+    /// - If hide_label is set, the placemark labels will only be shown if highlighted.
     void append_style( std::string id, std::string color_hex,
-                       float scale, std::string image_url );
+                       float scale, std::string image_url,
+                       bool hide_label=false );
+
+    /// Style: Defines a line style to use later
+    void append_line_style( std::string id, std::string color_hex,
+                            float width=1.0);
+   
+    /// StyleMap: Maps two styles together to create a bipolar icon
     void append_stylemap( std::string id,
                           std::string style_normal,
                           std::string style_highlight );

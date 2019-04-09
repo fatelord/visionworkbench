@@ -223,6 +223,17 @@ namespace vw {
     boost::shared_ptr<GDALDataset> dataset = get_dataset_ptr();
     int success;
     value = dataset->GetRasterBand(1)->GetNoDataValue(&success);
+
+    ImageFormat image_fmt = this->format();
+
+    // This is a bugfix. If the image has float values,
+    // must cast the nodata value to float before exporting
+    // it as double. Sometimes it is a float with extra noise
+    // which needs to be cleaned up.
+    if (image_fmt.channel_type == VW_CHANNEL_FLOAT32) {
+      value = std::max(float32(value), -std::numeric_limits<float32>::max()); // if -Inf
+    }
+
     return success;
   }
 
@@ -344,13 +355,13 @@ namespace vw {
 
     // Store away relevent information into the internal data
     // structure for this DiskImageResource
-    m_filename = filename;
-    m_format = format;
+    m_filename  = filename;
+    m_format    = format;
     m_blocksize = block_size;
 
     m_options = user_options;
 
-    if (m_options["PREDICTOR"] == ""){
+    if (m_options["PREDICTOR"].empty()){
       // Unless predictor was explicitly set, use predictor 3 for
       // compression of float/double, and predictor 2 for integers,
       // except whose size is one byte, as for those compression makes
@@ -480,17 +491,27 @@ namespace vw {
             // Only one of channels() or planes() will be nonzero.
             GDALRasterBand  *band = dataset->GetRasterBand(c+p+1);
             GDALDataType gdal_pix_fmt = vw_channel_id_to_gdal_pix_fmt::value(channel_type());
-            band->RasterIO( GF_Read, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
+            CPLErr result =
+                band->RasterIO( GF_Read, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
                             (uint8*)src(0,0,p) + channel_size(src.format.channel_type)*c,
                             src.format.cols, src.format.rows, gdal_pix_fmt, src.cstride, src.rstride );
+              if (result != CE_None) {
+                vw_out(WarningMessage, "fileio") << "RasterIO trouble: '"
+                    << CPLGetLastErrorMsg() << "'" << std::endl;
+              }
           }
         }
       }
       else { // palette conversion
         GDALRasterBand  *band = dataset->GetRasterBand(1);
         uint8 *index_data = new uint8[bbox.width() * bbox.height()];
-        band->RasterIO( GF_Read, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
+        CPLErr result =
+            band->RasterIO( GF_Read, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
                         index_data, bbox.width(), bbox.height(), GDT_Byte, 1, bbox.width() );
+        if (result != CE_None) {
+          vw_out(WarningMessage, "fileio") << "RasterIO trouble: '"
+              << CPLGetLastErrorMsg() << "'" << std::endl;
+        }
         PixelRGBA<uint8> *rgba_data = (PixelRGBA<uint8>*) src.data;
         for( int i=0; i<bbox.width()*bbox.height(); ++i )
           rgba_data[i] = m_palette[index_data[i]];
@@ -523,9 +544,14 @@ namespace vw {
         for (uint32 c = 0; c < num_channels(dst.format.pixel_format); c++) {
           GDALRasterBand *band = get_dataset_ptr()->GetRasterBand(c+p+1);
 
-          band->RasterIO( GF_Write, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
+          CPLErr result =
+              band->RasterIO( GF_Write, bbox.min().x(), bbox.min().y(), bbox.width(), bbox.height(),
                           (uint8*)dst(0,0,p) + channel_size(dst.format.channel_type)*c,
                           dst.format.cols, dst.format.rows, gdal_pix_fmt, dst.cstride, dst.rstride );
+          if (result != CE_None) {
+            vw_out(WarningMessage, "fileio") << "RasterIO trouble: '"
+                                             << CPLGetLastErrorMsg() << "'" << std::endl;
+          }
         }
       }
     }

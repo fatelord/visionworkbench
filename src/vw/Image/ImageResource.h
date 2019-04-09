@@ -18,7 +18,11 @@
 
 /// \file ImageResource.h
 ///
-/// Defines the abstract base image resource type.
+/// Defines the abstract base image resource types.  These types are for
+///  abstracting low level image writing to the level of writing entire
+///  ROIs of an image to a buffer in memory or on disk.  The
+///  FileIO/DiskImageView.h child of this class is the parent for all
+///  disk-based implementations.
 ///
 #ifndef __VW_IMAGE_IMAGERESOURCE_H__
 #define __VW_IMAGE_IMAGERESOURCE_H__
@@ -33,19 +37,15 @@ namespace vw {
   // Forward declaration
   struct ImageBuffer;
 
-
-  /// Copies image pixel data from the source buffer to the destination
-  /// buffer, converting the pixel format and channel type as required.
-  void convert( ImageBuffer const& dst, ImageBuffer const& src, bool rescale=false );
-
-
   /// Describes the format of an image, i.e. its dimensions, pixel
   /// structure, and channel type.
   struct ImageFormat {
-    uint32 cols, rows, planes;
+    uint32          cols, 
+                    rows, 
+                    planes;
     PixelFormatEnum pixel_format;
     ChannelTypeEnum channel_type;
-    bool premultiplied;
+    bool            premultiplied;
 
     ImageFormat()
       : cols(0), rows(0), planes(0),
@@ -74,24 +74,38 @@ namespace vw {
     }
 
     // These are only valid once you've populated this. No checking is performed.
-    size_t cstride()   const {return channel_size(channel_type) * num_channels(pixel_format);}
-    size_t rstride()   const {return cstride() * cols;}
-    size_t pstride()   const {return rstride() * rows;}
+    size_t cstride  () const {return channel_size(channel_type) * num_channels(pixel_format);}
+    size_t rstride  () const {return cstride() * cols;  }
+    size_t pstride  () const {return rstride() * rows;  }
     size_t byte_size() const {return pstride() * planes;}
-  };
+  }; // End class ImageFormat
 
-  // A read-only image resource
+  /// Dumps an ImageFormat to a std::ostream
+  inline std::ostream& operator<<( std::ostream& os, ImageFormat const& f ) {
+
+    os << "ImageFormat rows: " << f.rows << "  cols: " << f.cols
+       << "  planes: " << f.planes << "  pixel_format: " << f.pixel_format
+       << "  channel_type: " << f.channel_type
+       << "  premultiplied: " << f.premultiplied;
+    return os;
+  }
+
+  /// Copies image pixel data from the source buffer to the destination
+  /// buffer, converting the pixel format and channel type as required.
+  void convert( ImageBuffer const& dst, ImageBuffer const& src, bool rescale=false );
+  
+  /// Throws an exception if src cannot be converted to dst using the convert() function.
+  /// - Using this function allows us to throw a legible error message instead of gibberish.
+  void check_convertability(ImageFormat const& dst, ImageFormat const& src);
+
+
+  /// A read-only image resource
   class SrcImageResource {
     public:
       virtual ~SrcImageResource() {}
 
-      /// Returns the number of columns in an image resource.
-      virtual int32 cols() const {return format().cols;}
-
-      /// Returns the number of rows in an image resource.
-      virtual int32 rows() const {return format().rows;}
-
-      /// Returns the number of planes in an image resource.
+      virtual int32 cols  () const {return format().cols;  }
+      virtual int32 rows  () const {return format().rows;  }
       virtual int32 planes() const {return format().planes;}
 
       /// Returns the number of channels in a image resource.
@@ -132,7 +146,7 @@ namespace vw {
       virtual size_t native_size() const;
   };
 
-  // A write-only image resource
+  /// A write-only image resource
   class DstImageResource {
     public:
       virtual ~DstImageResource() {}
@@ -197,14 +211,9 @@ namespace vw {
 
     virtual ~ImageBuffer() {}
 
-    /// Returns the number of columns in the bufffer.
-    inline int32 cols() const { return format.cols; }
-
-    /// Returns the number of rows in the bufffer.
-    inline int32 rows() const { return format.rows; }
-
-    /// Returns the number of planes in the bufffer.
-    inline int32 planes() const { return format.planes; }
+    inline int32 cols  () const { return format.cols;   } ///< Returns the number of columns in the buffer.
+    inline int32 rows  () const { return format.rows;   } ///< Returns the number of rows    in the buffer.
+    inline int32 planes() const { return format.planes; } ///< Returns the number of planes  in the buffer.
 
     /// Returns the native pixel format of the bufffer.
     inline PixelFormatEnum pixel_format() const { return format.pixel_format; }
@@ -227,6 +236,7 @@ namespace vw {
     }
 
     /// Read the image resource at the given location into the given buffer.
+    /// - Though the ImageBuffer object is const, the contents of the buffer will change!
     inline void read( ImageBuffer const& buf, BBox2i const& bbox ) const {
       convert( buf, cropped(bbox) );
     }

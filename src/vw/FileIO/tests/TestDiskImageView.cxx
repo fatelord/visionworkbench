@@ -18,6 +18,10 @@
 
 #include <gtest/gtest_VW.h>
 #include <vw/FileIO/DiskImageView.h>
+#include <vw/FileIO/DiskImageResourceRaw.h>
+#include <vw/FileIO/DiskImageResourceGDAL.h>
+#include <vw/Image/ImageMath.h>
+#include <vw/Image/ImageIO.h>
 
 #include <vw/config.h>
 #include <vw/Image/PixelTypes.h>
@@ -105,3 +109,41 @@ TEST( DiskCacheImageView, Construction ) {
 
 }
 #endif
+
+// This DiskImageResource test is located in this file so that we can
+//  use DiskImageView to help us test it.
+TEST( DiskImageResource , Raw ) {
+
+  // Create a read-only image reader for the sample image
+  ImageFormat format;
+  format.cols = 300;
+  format.rows = 300;
+  format.planes = 1;
+  format.pixel_format = VW_PIXEL_GRAY;
+  format.channel_type = VW_CHANNEL_UINT8; // Open read-only with a tiny block size
+  DiskImageResourceRaw resource("sample.BIL", format, true, Vector2i(128, 128));
+  DiskImageView<PixelGray<unsigned char> > view(resource);
+  
+  // Check the image values
+  EXPECT_EQ(view.rows(), format.rows);
+  EXPECT_EQ(64, view(82, 109));
+  
+  // Check that we can write the image using the block writer.
+  // To ensure the image is completely written, force gdal_resource
+  // to go out of scope.
+  {
+    DiskImageResourceGDAL gdal_resource("bil_test.tif", view.impl().format());
+    ASSERT_NO_THROW(block_write_image(gdal_resource, view));
+  }
+
+  // Now read it back
+  boost::shared_ptr<DiskImageResource> gdal_resource2;
+  ASSERT_NO_THROW(gdal_resource2.reset(DiskImageResource::open("bil_test.tif")));
+
+  // Test that the default loader behaves as expected. It should fail
+  // because sample.DIM is missing. 
+  boost::shared_ptr<DiskImageResource> generic_resource_ptr;
+  EXPECT_THROW(generic_resource_ptr.reset(DiskImageResource::open("sample.BIL")), vw::ArgumentErr); 
+}
+
+

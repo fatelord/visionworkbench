@@ -18,7 +18,6 @@
 
 /// \file KML.cc
 ///
-/// An abstract base class referring to an image on disk.
 ///
 
 // Vision Workbench
@@ -81,14 +80,13 @@ namespace vw {
   // Low Level Functions
 
   // Enter / Exit Folder
-  // This creates those actual folders in GE that the user can turn on
-  // or off.
+  // This creates those actual folders in GE that the user can turn on or off.
   void KMLFile::enter_folder( std::string name,
                               std::string desc ) {
     open_bracket("Folder");
-    if ( name != "" )
+    if ( !name.empty() )
       m_output_file << m_tab << "<name>"<< name <<"</name>\n";
-    if ( desc != "" )
+    if ( !desc.empty() )
       m_output_file << m_tab << "<description>"<< desc <<"</description>\n";
   }
 
@@ -106,12 +104,12 @@ namespace vw {
                                   double altitude,
                                   bool extrude ) {
     open_bracket("Placemark");
-    if ( name != "" )
+    if ( !name.empty() )
       m_output_file << m_tab << "<name>"<< name <<"</name>\n";
-    if ( description != "" )
+    if ( !description.empty() )
       m_output_file << m_tab << "<description>"
                     << description << "</description>\n";
-    if ( style != "")
+    if ( !style.empty())
       m_output_file << m_tab << "<styleUrl>#"<<style<<"</styleUrl>\n";
     open_bracket("Point");
     if ( extrude )
@@ -120,6 +118,24 @@ namespace vw {
     m_output_file << m_tab << "<coordinates>"<< std::setw(10)
                   << lon <<","<< lat <<"," << altitude
                   << "</coordinates>\n";
+    close_brackets(2);
+  }
+  
+  void KMLFile::append_line( std::vector<Vector3> coordinates,
+                             std::string name,
+                             std::string style ) {
+    open_bracket("Placemark");
+    if ( !name.empty() )
+      m_output_file << m_tab << "<name>"<< name <<"</name>\n";
+    if ( !style.empty())
+      m_output_file << m_tab << "<styleUrl>#"<<style<<"</styleUrl>\n";
+    open_bracket("LineString");
+    m_output_file << m_tab << "<altitudeMode>absolute</altitudeMode>\n";
+    m_output_file << m_tab << "<coordinates>"<< std::setw(10);
+    for (size_t i=0; i<coordinates.size(); ++i)
+      m_output_file << coordinates[i].x() <<","<< coordinates[i].y() <<"," 
+                    << coordinates[i].z() << "\n";
+    m_output_file << "</coordinates>\n";
     close_brackets(2);
   }
 
@@ -141,9 +157,9 @@ namespace vw {
     double heading = angles(0)*180/M_PI, tilt = angles(1)*180/M_PI, roll = angles(2)*180/M_PI;
 
     open_bracket("Placemark");
-    if ( name != "" )
+    if ( !name.empty() )
       m_output_file << m_tab << "<name>"<< name <<"</name>\n";
-    if ( description != "" )
+    if ( !description.empty() )
       m_output_file << m_tab << "<description>"
                     << description << "</description>\n";
 
@@ -183,8 +199,6 @@ namespace vw {
     close_bracket();
   }
 
-  // LatLonAltBox: This is a bounding box, that only displays contents
-  // when viewer is inside box.
   void KMLFile::append_latlonaltbox( float north, float south,
                                      float east, float west ) {
     open_bracket("LatLonAltBox");
@@ -195,7 +209,7 @@ namespace vw {
     close_bracket();
   }
 
-  // Lod: This sets the min max pixel viewing range for an object
+  
   void KMLFile::append_lod( float min, float max ) {
     open_bracket("Lod");
     m_output_file << m_tab << "<minLodPixels>"<<min<<"</minLodPixels>\n";
@@ -203,13 +217,18 @@ namespace vw {
     close_bracket();
   }
 
-  // Style: Defines an Icon to use later
   void KMLFile::append_style( std::string id, std::string color_hex,
-                              float scale, std::string image_url ) {
+                              float scale, std::string image_url,
+                              bool hide_label ) {
     m_output_file << m_tab << "<Style id=\"" << id << "\">\n";
     m_tab.count++;
+    if (hide_label) {
+      open_bracket("LabelStyle");
+      m_output_file << m_tab << "<scale>0.0</scale>\n";
+      close_brackets(1);
+    }
     open_bracket("IconStyle");
-    if (color_hex != "" )
+    if (!color_hex.empty() )
       m_output_file << m_tab << "<color>" << color_hex << "</color>\n";
     m_output_file << m_tab << "<scale>" << scale << "</scale>\n";
     open_bracket("Icon");
@@ -219,7 +238,20 @@ namespace vw {
     m_output_file << m_tab << "</Style>\n";
   }
 
-  // StyleMap: Maps two styles together to create a bipolar icon
+  void KMLFile::append_line_style( std::string id, std::string color_hex,
+                                   float width) {
+    m_output_file << m_tab << "<Style id=\"" << id << "\">\n";
+    m_tab.count++;
+    open_bracket("LineStyle");
+    if (!color_hex.empty() )
+      m_output_file << m_tab << "<color>" << color_hex << "</color>\n";
+    m_output_file << m_tab << "<width>" << width << "</width>\n";
+    close_brackets(1);
+    m_tab.count--;
+    m_output_file << m_tab << "</Style>\n";
+  }
+
+
   void KMLFile::append_stylemap( std::string id,
                                  std::string style_normal,
                                  std::string style_highlight ) {
@@ -256,7 +288,7 @@ namespace vw {
   // Open / Close Stuff
   void KMLFile::open_kml() {
     std::ostringstream path;
-    if ( m_directory != "" )
+    if ( !m_directory.empty() )
       path << m_directory << "/";
     path << m_filename;
     fs::path kml_path( path.str() );

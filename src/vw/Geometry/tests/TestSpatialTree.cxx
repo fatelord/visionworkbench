@@ -22,7 +22,6 @@
 #include <vw/Geometry/SpatialTree.h>
 #include <vw/Math/Vector.h>
 #include <vw/Math/BBox.h>
-#include <vw/Core.h>
 #include <boost/foreach.hpp>
 #include <sstream>
 
@@ -41,7 +40,7 @@ class TestGeomPrimitive : public BBoxN, public GeomPrimitive
   //NOTE: do not yet implement distance() because do not yet test SpatialTree::closest()
   virtual bool contains(const Vector<double> &point) const {return BBoxN::contains(point);}
   virtual bool intersects(const GeomPrimitive *prim) const {return BBoxN::intersects(prim->bounding_box());}
-  virtual const BBox<double> &bounding_box() const {return *this;}
+  virtual const BBoxN &bounding_box() const {return *this;}
 };
 
 int which_one(GeomPrimitive *p, GeomPrimitive *ps[])

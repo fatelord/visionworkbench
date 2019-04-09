@@ -42,7 +42,7 @@ namespace vw {
   /// \cond INTERNAL
   // Stub classes defining common interpolation modes.  You may define
   // your own class similar to those that appear below.  The stub class
-  // must functor must have an Interpolator type function that returns
+  // functor must have an Interpolator type function that returns
   // the type of the interpolation functor, and a static interpolator()
   // function that returns the interpolator itself.  For simple
   // functions, the stub class and the interpolation function may be
@@ -237,28 +237,28 @@ namespace vw {
   {
   private:
     typedef typename InterpT::template Interpolator<ImageT>::type interp_type;
-    ImageT m_image;
+    ImageT      m_image;
     interp_type m_interp_func;
   public:
 
     typedef typename ImageT::pixel_type pixel_type;
-    typedef pixel_type result_type;
+    typedef pixel_type                  result_type;
     typedef ProceduralPixelAccessor<InterpolationView<ImageT, InterpT> > pixel_accessor;
 
     InterpolationView( ImageT const& image,
                        InterpT const& /*interp_stub*/ = InterpT()) :
       m_image(image), m_interp_func(InterpT::interpolator(image)) {}
 
-    inline int32 cols() const { return m_image.cols(); }
-    inline int32 rows() const { return m_image.rows(); }
+    inline int32 cols  () const { return m_image.cols  (); }
+    inline int32 rows  () const { return m_image.rows  (); }
     inline int32 planes() const { return m_image.planes(); }
 
     inline pixel_accessor origin() const { return pixel_accessor(*this, 0, 0); }
 
     inline result_type operator() (double i, double j, int32 p = 0) const { return m_interp_func(m_image,i,j,p); }
 
-    ImageT const& child() const { return m_image; }
-    InterpT const& func() const { return m_interp_func; }
+    ImageT  const& child() const { return m_image;       }
+    InterpT const& func () const { return m_interp_func; }
 
     /// \cond INTERNAL
     // We can make an optimization here.  If the pixels in the child
@@ -301,6 +301,8 @@ namespace vw {
   struct IsFloatingPointIndexable<InterpolationView<ImageT, InterpT> > : public true_type {};
   /// \endcond
 
+  /// Specialize the SparseImageCheck class for wrapping the InterpolationView class.
+  /// - The test bbox is expanded by the interpolation buffer size.
   template <class ImageT, class InterpT>
   class SparseImageCheck<InterpolationView<ImageT, InterpT> > {
     InterpolationView<ImageT, InterpT> const& m_view;
@@ -358,12 +360,12 @@ namespace vw {
 
 } // namespace vw
 
-
+/*
 // -------------------------------------------------------------------------------
 // SSE Optimizations
 // -------------------------------------------------------------------------------
 
-#if defined(VW_ENABLE_SSE) && (VW_ENABLE_SSE==1)
+#if defined(VW_ENABLE_SSE)
 #include <xmmintrin.h>
 
 namespace vw {
@@ -464,5 +466,5 @@ namespace vw {
 } // namespace vw
 
 #endif // VW_ENABLE_SSE
-
+*/
 #endif // __VW_IMAGE_INTERPOLATION_H__

@@ -29,6 +29,8 @@
 /// a virtualized reference to an arbitrary image view with a given
 /// pixel type.
 ///
+/// - WARNING: Never refer to these objects by reference!  The
+//             behaviour is undefined.
 #ifndef __VW_IMAGE_IMAGEVIEWREF_H__
 #define __VW_IMAGE_IMAGEVIEWREF_H__
 
@@ -48,10 +50,10 @@ namespace vw {
   public:
     virtual ~ImageViewRefAccessorBase() {}
     virtual ImageViewRefAccessorBase* copy() const = 0;
-    virtual void next_col() = 0;
-    virtual void prev_col() = 0;
-    virtual void next_row() = 0;
-    virtual void prev_row() = 0;
+    virtual void next_col  () = 0;
+    virtual void prev_col  () = 0;
+    virtual void next_row  () = 0;
+    virtual void prev_row  () = 0;
     virtual void next_plane() = 0;
     virtual void prev_plane() = 0;
     virtual void advance( ssize_t di, ssize_t dj, ssize_t dp=0 ) = 0;
@@ -72,10 +74,10 @@ namespace vw {
 
     virtual ImageViewRefAccessorBase<pixel_type>* copy() const { return new ImageViewRefAccessorImpl(m_iter); }
 
-    virtual void next_col() { m_iter.next_col(); }
-    virtual void prev_col() { m_iter.prev_col(); }
-    virtual void next_row() { m_iter.next_row(); }
-    virtual void prev_row() { m_iter.prev_row(); }
+    virtual void next_col  () { m_iter.next_col();   }
+    virtual void prev_col  () { m_iter.prev_col();   }
+    virtual void next_row  () { m_iter.next_row();   }
+    virtual void prev_row  () { m_iter.prev_row();   }
     virtual void next_plane() { m_iter.next_plane(); }
     virtual void prev_plane() { m_iter.prev_plane(); }
     virtual void advance( ssize_t di, ssize_t dj, ssize_t dp=0 ) {
@@ -93,23 +95,27 @@ namespace vw {
   private:
     boost::scoped_ptr< ImageViewRefAccessorBase<PixelT> > m_iter;
   public:
-    typedef PixelT pixel_type;
-    typedef PixelT result_type;
+    typedef PixelT  pixel_type;
+    typedef PixelT  result_type;
     typedef ssize_t offset_type;
 
     template <class IterT> ImageViewRefAccessor( IterT const& iter ) : m_iter( new ImageViewRefAccessorImpl<IterT>(iter) ) {}
     ~ImageViewRefAccessor() {}
 
     ImageViewRefAccessor( ImageViewRefAccessor const& other ) : m_iter( other.m_iter->copy() ) {}
-    ImageViewRefAccessor& operator=( ImageViewRefAccessor const& other ) { m_iter = other.m_iter->copy(); }
+    ImageViewRefAccessor& operator=( ImageViewRefAccessor const& other ) { 
+      m_iter = other.m_iter->copy(); return *this; 
+    }
 
-    inline ImageViewRefAccessor& next_col() { m_iter->next_col(); return *this; }
-    inline ImageViewRefAccessor& prev_col() { m_iter->prev_col(); return *this; }
-    inline ImageViewRefAccessor& next_row() { m_iter->next_row(); return *this; }
-    inline ImageViewRefAccessor& prev_row() { m_iter->prev_row(); return *this; }
+    inline ImageViewRefAccessor& next_col  () { m_iter->next_col();   return *this; }
+    inline ImageViewRefAccessor& prev_col  () { m_iter->prev_col();   return *this; }
+    inline ImageViewRefAccessor& next_row  () { m_iter->next_row();   return *this; }
+    inline ImageViewRefAccessor& prev_row  () { m_iter->prev_row();   return *this; }
     inline ImageViewRefAccessor& next_plane() { m_iter->next_plane(); return *this; }
     inline ImageViewRefAccessor& prev_plane() { m_iter->prev_plane(); return *this; }
-    inline ImageViewRefAccessor& advance( ssize_t di, ssize_t dj, ssize_t dp=0 ) { m_iter->advance(di,dj,dp=0); return *this; }
+    inline ImageViewRefAccessor& advance( ssize_t di, ssize_t dj, ssize_t dp=0 ) { 
+      m_iter->advance(di,dj,dp=0); return *this; 
+    }
     inline pixel_type operator*() const { return *(*m_iter); }
   };
 
@@ -124,10 +130,10 @@ namespace vw {
 
     virtual ~ImageViewRefBase() {}
 
-    virtual int32 cols() const = 0;
-    virtual int32 rows() const = 0;
+    virtual int32 cols  () const = 0;
+    virtual int32 rows  () const = 0;
     virtual int32 planes() const = 0;
-    virtual pixel_type operator()( int32 i, int32 j, int32 p ) const = 0;
+    virtual pixel_type operator()( int32 i,  int32 j,  int32 p ) const = 0;
     virtual pixel_type operator()( double i, double j, int32 p ) const = 0;
     virtual pixel_accessor origin() const = 0;
 
@@ -147,12 +153,13 @@ namespace vw {
     ImageViewRefImpl( ImageViewBase<ViewT> const& view ) : m_view(view.impl()) {}
     virtual ~ImageViewRefImpl() {}
 
-    virtual int32 cols() const { return m_view.cols(); }
-    virtual int32 rows() const { return m_view.rows(); }
-    virtual int32 planes() const { return m_view.planes(); }
-    virtual pixel_type operator()( int32 i, int32 j, int32 p ) const { return m_view(i,j,p); }
-    virtual pixel_type operator()( double i, double j, int32 p ) const { return m_view(i,j,p); }
+    virtual int32          cols  () const { return m_view.cols();   }
+    virtual int32          rows  () const { return m_view.rows();   }
+    virtual int32          planes() const { return m_view.planes(); }
     virtual pixel_accessor origin() const { return m_view.origin(); }
+    
+    virtual pixel_type     operator()( int32  i, int32  j, int32 p ) const { return m_view(i,j,p); }
+    virtual pixel_type     operator()( double i, double j, int32 p ) const { return m_view(i,j,p); }
 
     virtual bool sparse_check( BBox2i const& bbox ) const { return vw::sparse_check( m_view, bbox ); }
     virtual void rasterize( ImageView<pixel_type> const& dest, BBox2i const& bbox ) const { m_view.rasterize( dest, bbox ); }
@@ -194,22 +201,20 @@ namespace vw {
     // such as in STL containers.
     ImageViewRef() : m_view( new ImageViewRefImpl<ImageView<PixelT> >(ImageView<PixelT>()) ) {}
 
-    // Assignment constructor creates an ImageViewRef from another
-    // ImageView.
+    // Assignment constructor creates an ImageViewRef from another ImageView.
     template <class ViewT> ImageViewRef( ImageViewBase<ViewT> const& view ) : m_view( new ImageViewRefImpl<ViewT>(view) ) {}
     ~ImageViewRef() {}
 
     template <class ViewT> void reset( ImageViewBase<ViewT> const& view ) { m_view.reset( new ImageViewRefImpl<ViewT>(view) ); }
 
-    inline int32 cols() const { return m_view->cols(); }
-    inline int32 rows() const { return m_view->rows(); }
+    inline int32 cols  () const { return m_view->cols();   }
+    inline int32 rows  () const { return m_view->rows();   }
     inline int32 planes() const { return m_view->planes(); }
 
     // These difficult enable-ifs are to avoid ambigious operator
     // overload. The rule below is, if the user passes anything float
     // like, we'll cast all of the input to double. This is done with
-    // out consideration if the underlining type really is floating
-    // point accessible.
+    // out consideration if the underlining type really is floating point accessible.
     template <class T1, class T2>
     inline typename boost::enable_if<boost::mpl::and_<boost::is_integral<T1>,boost::is_integral<T2> >,pixel_type>::type
     operator()( T1 i, T2 j, int32 p=0 ) const {
@@ -245,8 +250,7 @@ namespace vw {
 
     // A special performance-enhancing overload for rasterizing directly into
     // an ImageView with the proper pixel type.  This cannot be templatized
-    // or otherwise generalized because it calls m_view's virtual rasterize
-    // method.
+    // or otherwise generalized because it calls m_view's virtual rasterize method.
     inline void rasterize( ImageView<PixelT> const& dest, BBox2i const& bbox ) const {
       m_view->rasterize( dest, bbox );
     }

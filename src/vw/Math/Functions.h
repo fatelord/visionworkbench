@@ -57,6 +57,18 @@ namespace impl {
     else return int32(val+0.5f);
   }
 
+  // Make _round() resolve unambiguously to a no-op if the input type
+  // is integral, in which case the float and double variants are
+  // equally valid.
+  inline int8   _round( int8 v )   { return v; }
+  inline uint8  _round( uint8 v )  { return v; }
+  inline int16  _round( int16 v )  { return v; }
+  inline uint16 _round( uint16 v ) { return v; }
+  inline int32  _round( int32 v )  { return v; }
+  inline uint32 _round( uint32 v ) { return v; }
+  inline int64  _round( int64 v )  { return v; }
+  inline uint64 _round( uint64 v ) { return v; }
+
   /// A special inlinable implementation of floor()
   /// for the common case of double->int32.
   inline int32 _floor( double val ) {
@@ -201,6 +213,51 @@ namespace impl {
     return erfc( (double)arg );
   }
 #endif
+
+  /// Next power of 2
+  inline int nextpow2(double x){
+    int k = 1;
+    while (k < x) k *= 2;
+    return k;    
+  }
+
+  // -- Hamming distance implementations ---------------------------
+
+  inline size_t hamming_distance(uint8 a, uint8 b) {
+    uint8 dist = 0;
+    uint8 val = a ^ b; // XOR
+
+    // Count the number of bits set
+    while (val != 0) {
+        // A bit is set, so increment the count and clear the bit
+        ++dist;
+        val &= val - 1;
+    }
+    return static_cast<size_t>(dist); // Return the number of differing bits
+  }
+
+  inline size_t hamming_distance(uint16 a, uint16 b) {
+    uint16 dist = 0;
+    uint16 val = a ^ b; // XOR
+
+    // Count the number of bits set
+    while (val != 0) {
+        // A bit is set, so increment the count and clear the bit
+        ++dist;
+        val &= val - 1;
+    }
+    return static_cast<size_t>(dist); // Return the number of differing bits
+  }
+
+  inline size_t hamming_distance(uint32 a, uint32 b) {
+    uint32 val = a ^ b; // XOR
+    return __builtin_popcount(val); // Use GCC compiler function to count the set bits
+  }
+
+  inline size_t hamming_distance(uint64 a, uint64 b) {
+    uint64 val = a ^ b; // XOR
+    return __builtin_popcountl(val); // Use GCC compiler function to count the set bits
+  }
 
 } // namespace vw
 

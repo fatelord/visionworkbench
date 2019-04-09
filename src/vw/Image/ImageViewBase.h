@@ -27,6 +27,7 @@
 /// classes.  Finally, there is the default rasterization function,
 /// \ref vw::rasterize, which iterates over source and destination views
 /// copying pixels from one into the other.
+/// - We write new image views all the time, so this is not a rare thing!
 ///
 #ifndef __VW_IMAGE_IMAGEVIEWBASE_H__
 #define __VW_IMAGE_IMAGEVIEWBASE_H__
@@ -58,24 +59,36 @@ namespace vw {
 
     /// \cond INTERNAL
     // Methods to access the derived type
-    inline ImplT& impl() { return static_cast<ImplT&>(*this); }
+    inline ImplT      & impl()       { return static_cast<ImplT      &>(*this); }
     inline ImplT const& impl() const { return static_cast<ImplT const&>(*this); }
     /// \endcond
 
     /// An STL-compatible iterator type.
-    typedef PixelIterator<ImplT> iterator;
+    typedef PixelIterator<      ImplT> iterator;
     typedef PixelIterator<const ImplT> const_iterator;
 
     /// Returns an iterator pointing to the first pixel in the image.
-    iterator begin() { return iterator(impl(),0,0,0); }
+          iterator begin()       { return       iterator(impl(),0,0,0); }
     const_iterator begin() const { return const_iterator(impl(),0,0,0); }
 
     /// Returns an iterator pointing one past the last pixel in the image.
-    iterator end() { return iterator(impl(),0,0,impl().planes()); }
+          iterator end()       { return       iterator(impl(),0,0,impl().planes()); }
     const_iterator end() const { return const_iterator(impl(),0,0,impl().planes()); }
 
     /// Returns the number of channels in the image's pixel type.
     inline int32 channels() const { return CompoundNumChannels<typename ImplT::pixel_type>::value; }
+
+    inline int32 cols  () const { return impl().cols();   }
+    inline int32 rows  () const { return impl().rows();   }
+    inline int32 planes() const { return impl().planes(); }
+
+    /// Return true if the pixel falls inside the image bounds.
+    bool pixel_in_bounds(int col, int row) const {
+      return ((col >= 0) && (row >= 0) && (col <= cols()-1) && (row <= rows()-1)); 
+    }
+    bool pixel_in_bounds(Vector2i pixel) const {
+      return pixel_in_bounds(pixel[0], pixel[1]);
+    }
 
     /// Returns the format ID of the image's pixel type.
     inline PixelFormatEnum pixel_format() const { return PixelFormatID<typename ImplT::pixel_type>::value; }
@@ -86,14 +99,17 @@ namespace vw {
     /// Returns an ImageFormat object describing the image format.
     ImageFormat format() const {
       ImageFormat format;
-      format.cols = impl().cols();
-      format.rows = impl().rows();
-      format.planes = impl().planes();
-      format.pixel_format = pixel_format();
-      format.channel_type = channel_type();
+      format.cols          = impl().cols();
+      format.rows          = impl().rows();
+      format.planes        = impl().planes();
+      format.pixel_format  = pixel_format();
+      format.channel_type  = channel_type();
       format.premultiplied = true;
       return format;
     }
+    
+    /// Returns the image size.
+    inline Vector2 get_size() const {return Vector2(impl().cols(), impl().rows());} 
 
   /// \cond INTERNAL
     protected:
@@ -103,7 +119,7 @@ namespace vw {
     ImageViewBase(ImageViewBase const&) {}
     ImageViewBase& operator=(ImageViewBase const&) { return *this; }
     /// \endcond
-  };
+  }; // End class ImageViewBase
 
 
   // *******************************************************************
@@ -132,18 +148,19 @@ namespace vw {
   // Pixel iteration functions
   // *******************************************************************
 
+  /// Function to apply a functor to each pixel of an input image.
   template <class ViewT, class FuncT>
   void for_each_pixel_( const ImageViewBase<ViewT> &view_, FuncT &func, const ProgressCallback &progress ) {
     const ViewT& view = view_.impl();
     typedef typename ViewT::pixel_accessor pixel_accessor;
     pixel_accessor plane_acc = view.origin();
-    for( int32 plane = view.planes(); plane; --plane ) {
+    for( int32 plane = view.planes(); plane; --plane ) { // Loop through planes
       pixel_accessor row_acc = plane_acc;
-      for( int32 row = 0; row<view.rows(); ++row ) {
+      for( int32 row = 0; row<view.rows(); ++row ) { // Loop through rows
         progress.report_fractional_progress(row,view.rows());
         pixel_accessor col_acc = row_acc;
-        for( int32 col = view.cols(); col; --col ) {
-          func( *col_acc );
+        for( int32 col = view.cols(); col; --col ) { // Loop through columns
+          func( *col_acc );  // Apply the functor to this pixel value
           col_acc.next_col();
         }
         row_acc.next_row();
@@ -153,16 +170,18 @@ namespace vw {
     progress.report_finished();
   }
 
+  /// Overload with default no progress callback.
   template <class ViewT, class FuncT>
   void for_each_pixel( const ImageViewBase<ViewT> &view, FuncT &func, const ProgressCallback &progress = ProgressCallback::dummy_instance() ) {
     for_each_pixel_<ViewT,FuncT>(view,func,progress);
   }
-
+  /// Const functor overload
   template <class ViewT, class FuncT>
   void for_each_pixel( const ImageViewBase<ViewT> &view, const FuncT &func, const ProgressCallback &progress = ProgressCallback::dummy_instance() ) {
     for_each_pixel_<ViewT,const FuncT>(view,func,progress);
   }
 
+  /// Overload for applying a functor to two input images.
   template <class View1T, class View2T, class FuncT>
   void for_each_pixel_( const ImageViewBase<View1T> &view1_, const ImageViewBase<View2T> &view2_, FuncT &func ) {
     const View1T& view1 = view1_.impl();
@@ -202,6 +221,7 @@ namespace vw {
     for_each_pixel_<View1T,View2T,const FuncT>(view1,view2,func);
   }
 
+  /// Overload for applying a functor to three input images.
   template <class View1T, class View2T, class View3T, class FuncT>
   void for_each_pixel_( const ImageViewBase<View1T> &view1_, const ImageViewBase<View2T> &view2_, const ImageViewBase<View3T> &view3_, FuncT &func ) {
     const View1T& view1 = view1_.impl();
@@ -258,22 +278,21 @@ namespace vw {
   /// optimized rasterization methods.  The user can also call it
   /// explicitly when pixel-by-pixel rasterization is preferred to
   /// the default optimized rasterization behavior.  This can be
-  /// useful in some cases, such as when the views are heavily
-  /// subsampled.
+  /// useful in some cases, such as when the views are heavily subsampled.
   template <class SrcT, class DestT>
   inline void rasterize( SrcT const& src, DestT const& dest, BBox2i bbox ) {
-    typedef typename DestT::pixel_type DestPixelT;
-    typedef typename SrcT::pixel_accessor SrcAccT;
+    typedef typename DestT::pixel_type     DestPixelT;
+    typedef typename SrcT::pixel_accessor  SrcAccT;
     typedef typename DestT::pixel_accessor DestAccT;
     VW_ASSERT( int(dest.cols())==bbox.width() && int(dest.rows())==bbox.height() && dest.planes()==src.planes(),
                ArgumentErr() << "rasterize: Source and destination must have same dimensions." );
-    SrcAccT splane = src.origin().advance(bbox.min().x(),bbox.min().y());
+    SrcAccT  splane = src.origin().advance(bbox.min().x(),bbox.min().y());
     DestAccT dplane = dest.origin();
     for( int32 plane=src.planes(); plane; --plane ) {
-      SrcAccT srow = splane;
+      SrcAccT  srow = splane;
       DestAccT drow = dplane;
       for( int32 row=bbox.height(); row; --row ) {
-        SrcAccT scol = srow;
+        SrcAccT  scol = srow;
         DestAccT dcol = drow;
         for( int32 col=bbox.width(); col; --col ) {
 #ifdef __llvm__
@@ -344,6 +363,27 @@ namespace vw {
   template <class Image1T, class Image2T>
   inline bool operator!=( ImageViewBase<Image1T> const& m1, ImageViewBase<Image2T> const& m2 ) {
     return !vw::equal(m1, m2);
+  }
+
+  // Is there a better place to put this function?
+  /// Draw a line of a single pixel in an image.
+  template <class ImageT, class ValueT>
+  void draw_line( ImageViewBase<ImageT>& image,
+                  ValueT const& value,
+                  Vector2i const& start,
+                  Vector2i const& end ) {
+
+    BBox2i bound = bounding_box(image.impl());
+    if ( !bound.contains( start ) ||
+         !bound.contains( end ) )
+      return;
+    Vector2i delta = end - start;
+    float inc_amt = 1/norm_2(delta);
+    for ( float r=0; r<1.0; r+=inc_amt ) {
+      int i = (int)(0.5 + start.x() + r*float(delta.x()) );
+      int j = (int)(0.5 + start.y() + r*float(delta.y()) );
+      image.impl()(i,j) = value;
+    }
   }
 
   /// Dumps a matrix to a std::ostream

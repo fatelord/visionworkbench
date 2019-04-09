@@ -43,9 +43,8 @@ namespace cartography {
       vw_throw( LogicErr() << "read_gdal_georeference: Could not read georeference. No file has been opened." );
 
     // Pull the projection and datum information out of the file if available
-    if( dataset->GetProjectionRef() != NULL ) {
+    if( dataset->GetProjectionRef() != NULL )
       georef.set_wkt(dataset->GetProjectionRef());
-    }
 
     double geo_transform[6];
     Matrix<double,3,3> transform;
@@ -77,6 +76,13 @@ namespace cartography {
       return false;
     }
 
+    // Update the longitude center of the georef using the image size.
+    int cols = resource.format().cols;
+    int rows = resource.format().rows; 
+    BBox2 image_bbox(0,0,cols, rows);
+    georef.update_lon_center(image_bbox);
+    
+
     // Georeference functions need not be invertible.  When we perform
     // a reverse lookup (e.g. during a geotransformation) we rely on
     // PROJ.4 to pick one possible value.  However, the georeference
@@ -86,13 +92,29 @@ namespace cartography {
     // problem.  In the mean time, we at least test whether the
     // georeference is likely to run into this problem (and warn the
     // user) by checking whether forward- and reverse-projecting the
-    // origin pixel lands us back at the origin.
-    Vector2 origin =
-      georef.lonlat_to_pixel( georef.pixel_to_lonlat( Vector2() ) );
-    if( origin.x()*origin.x() + origin.y()*origin.y() > 0.1 ) {
-      vw_out(WarningMessage) << "read_gdal_georeference(): WARNING! Resource file " <<
-        resource.filename() << " contains a non-normal georeference." << std::endl;
+    // four corner pixels lands us back at the same pixel.
+    
+    std::vector<Vector2> test_pixels(4);
+    test_pixels[0] = Vector2(0,     0);
+    test_pixels[1] = Vector2(0,     rows-1);
+    test_pixels[2] = Vector2(cols-1,0);
+    test_pixels[3] = Vector2(cols-1,rows-1);
+    
+    for (int i=0; i<4; ++i) {
+      double error = 9999;
+      bool have_error = false;
+      try {
+        error = georef.test_pixel_reprojection_error(test_pixels[i]);
+      } catch (std::exception &e) {
+        vw_out(WarningMessage) << e.what() << std::endl;
+        have_error = true;
+      }
+      if ( error > 0.1 || have_error ) {
+        vw_out(WarningMessage) << "read_gdal_georeference(): WARNING! Resource file " <<
+          resource.filename() << " contains a non-normal georeference." << std::endl;
+      }
     }
+    
     return true;
   }
 
@@ -104,41 +126,15 @@ namespace cartography {
       vw_throw( LogicErr() << "GeoReferenceHelperGDAL: Could not write georeference. No file has been opened." );
 
     // Store the transform matrix
-    double geo_transform[6] =
-      { georef.transform()(0,2), georef.transform()(0,0),
-        georef.transform()(0,1), georef.transform()(1,2),
-        georef.transform()(1,0), georef.transform()(1,1) };
+    double geo_transform[6] = { georef.transform()(0,2), georef.transform()(0,0),
+                                georef.transform()(0,1), georef.transform()(1,2),
+                                georef.transform()(1,0), georef.transform()(1,1) };
     dataset->SetGeoTransform( geo_transform );
 
     // This is a little ridiculous, but GDAL can't write geotiffs
     // without a string of Well Known Text (WKT), so we must conjure
-    // up an OGRSpatialReference here and use it to convert from
-    // proj.4 to WKT.
-    //
-    // However, we first set the datum parameters in the
-    // ORGSpatialReference object directly.
-    //
-    // For perfect spheres, we set the inverse flattening to
-    // zero. This is making us compliant with OpenGIS Implementation
-    // Specification: CTS 12.3.10.2. In short, we are not allowed to
-    // write infinity as most tools, like ArcGIS, can't read that.
-    OGRSpatialReference gdal_spatial_ref;
-    Datum const& datum = georef.datum();
-    gdal_spatial_ref.importFromProj4(georef.proj4_str().c_str());
-    gdal_spatial_ref.SetGeogCS( "Geographic Coordinate System",
-                                datum.name().c_str(),
-                                datum.spheroid_name().c_str(),
-                                datum.semi_major_axis(),
-                                datum.semi_major_axis() == datum.semi_minor_axis() ?
-                                0 : datum.inverse_flattening(),
-                                datum.meridian_name().c_str(),
-                                datum.meridian_offset() );
-
-    char* wkt_str_tmp;
-    gdal_spatial_ref.exportToWkt(&wkt_str_tmp);
-    std::string wkt_str = wkt_str_tmp;
-    OGRFree(wkt_str_tmp);
-
+    // up an OGRSpatialReference here and use it to convert from proj.4 to WKT.
+    std::string wkt_str = georef.get_wkt();
     dataset->SetProjection( wkt_str.c_str() );
 
     // Set the pixel interpretation for the image.  See the comments
@@ -149,6 +145,7 @@ namespace cartography {
       dataset->SetMetadataItem(GDALMD_AREA_OR_POINT, GDALMD_AOP_POINT);
   }
 
+  // Read an arbitrary name = value pair from the geoheader.
   bool read_gdal_string( DiskImageResourceGDAL const& resource,
                          std::string const& str_name,
                          std::string & str_val ) {
@@ -172,6 +169,28 @@ namespace cartography {
     return false;
   }
 
+  bool read_gdal_strings( DiskImageResourceGDAL const& resource, 
+                          std::map<std::string, std::string>& value_pairs) {
+
+    boost::shared_ptr<GDALDataset>dataset = resource.get_dataset_ptr();
+    if (!dataset)
+      vw_throw( LogicErr() << "read_gdal_string: Could not read string. "
+                << "No file has been opened." );
+
+    char **metadata = dataset->GetMetadata();
+    if( CSLCount(metadata) > 0 ) {
+      for( int i = 0; metadata[i] != NULL; i++ ) {
+        std::vector<std::string> split_vec;
+        boost::split(split_vec, metadata[i], boost::is_any_of("=") );
+        if (split_vec.size() >= 2){
+          value_pairs[split_vec[0]] = split_vec[1];
+        }
+      }
+    }
+    return false;
+  }
+
+  // Write an arbitrary name = value pair in the geoheader.
   void write_gdal_string( DiskImageResourceGDAL& resource,
                           std::string const& str_name,
                           std::string const& str_val ) {
@@ -179,7 +198,7 @@ namespace cartography {
     boost::shared_ptr<GDALDataset> dataset = resource.get_dataset_ptr();
     if (!dataset)
       vw_throw( LogicErr() << "write_gdal_string: Could not write string. "
-                << "No file has been opened." );
+                           << "No file has been opened." );
 
     dataset->SetMetadataItem(str_name.c_str(), str_val.c_str());
   }

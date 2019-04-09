@@ -344,7 +344,7 @@ int main( int argc, char *argv[] ) {
     return 1;
   }
 
-  if( opt.output_prefix == "" )
+  if( opt.output_prefix.empty() )
     opt.output_prefix=fs::path(opt.input_file_name).replace_extension().string();
 
   //checking strings
@@ -355,7 +355,7 @@ int main( int argc, char *argv[] ) {
     algorithm_string == "sa" ||
     algorithm_string == "planefit" ||
 
-    algorithm_string == "" ) ) { //it's okay if it isn't set?
+    algorithm_string.empty() ) ) { //it's okay if it isn't set?
     vw_out() << "Unknown opt.algorithm: " << algorithm_string << ". Options are : [ horn, fh, sa, planefit ]\n";
     exit(0);
   }
@@ -381,7 +381,7 @@ int main( int argc, char *argv[] ) {
 
   try {
     // Get the right pixel/channel type.
-    ImageFormat fmt = tools::image_format(opt.input_file_name);
+    ImageFormat fmt = vw::image_format(opt.input_file_name);
 
     switch(fmt.pixel_format) {
     case VW_PIXEL_GRAY:

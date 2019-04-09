@@ -23,118 +23,55 @@
 #include <vw/BundleAdjustment/CameraRelation.h>
 #include <vw/Camera/CameraModel.h>
 #include <vw/Cartography/SimplePointImageManipulation.h>
-
+#include <vw/Cartography/Datum.h>
 #include <boost/filesystem/operations.hpp>
 #include <boost/foreach.hpp>
 
 /// \file ControlNetworkLoader.h Functions for generating control networks
 
+// TODO: Move in to ControlNetwork functions?
+
 namespace vw {
 namespace ba {
 
-  // Builds a control network using given camera models and original
-  // image names. This function uses Boost::FS to then find match files
-  // that would have been created by 'ipmatch' by searching the entire
-  // permutation of the image_files vector.
-  void build_control_network( ControlNetwork& cnet,
-                               std::vector<boost::shared_ptr<camera::CameraModel> > const& camera_models,
-                               std::vector<std::string> const& image_files,
-                               size_t min_matches = 30,
-                              std::vector<std::string> const& directories = std::vector<std::string>(1,".") );
+  /// Builds a control network using given camera models and original
+  /// image names. This function uses Boost::FS to then find match files
+  /// that would have been created by 'ipmatch' by searching the entire
+  /// permutation of the image_files vector.
+  bool build_control_network(bool triangulate_points,
+                             ControlNetwork& cnet,
+                             std::vector<boost::shared_ptr<camera::CameraModel> >
+                             const& camera_models,
+                             std::vector<std::string> const& image_files,
+                             std::map< std::pair<int, int>, std::string> const& match_files,
+                             size_t min_matches,
+                             double min_angle_radians,
+                             double forced_triangulation_distance);
+  
+  /// Recomputes the world location of a point based on camera observations.
+  /// - Returns the mean triangulation error.
+  double triangulate_control_point(ControlPoint& cp,
+                                   std::vector<boost::shared_ptr<camera::CameraModel> >
+                                   const& camera_models,
+                                   double min_angle_radians,
+                                   double forced_triangulation_distance);
 
-  void triangulate_control_point( ControlPoint& cp,
-                                  std::vector<boost::shared_ptr<camera::CameraModel> > const& camera_models,
-                                  double const& minimum_angle );
-
-  // Adds ground control points from individual GCP files to an
-  // already built Control Network. The vector image_files serves as a look
-  // up chart for relating image names in GCP files to CNET's internal
-  // indexing.
-  template <class IterT>
-  void add_ground_control_points( ControlNetwork& cnet,
-                                  std::vector<std::string> const& image_files,
-                                  IterT gcp_start, IterT gcp_end ) {
-    namespace fs = boost::filesystem;
-
-    // Creating a version of image_files that doesn't contain the path
-    typedef std::map<std::string,size_t> LookupType;
-    LookupType image_lookup;
-    for (size_t i = 0; i < image_files.size(); i++ ) {
-      image_lookup[image_files[i]] = i;
-      image_lookup[fs::path(image_files[i]).filename().string()] = i;
-    }
-
-    while ( gcp_start != gcp_end ) {
-      if ( !fs::exists( *gcp_start ) ) {
-        gcp_start++;
-        continue;
-      }
-
-      // Data to be loaded
-      std::vector<Vector2> measure_locations;
-      std::vector<std::string> measure_cameras;
-      Vector3 world_location, world_sigma;
-
-      vw_out(VerboseDebugMessage,"ba") << "\tLoading \"" << *gcp_start
-                                       << "\".\n";
-      int count = 0;
-      std::ifstream ifile( (*gcp_start).c_str() );
-      while (!ifile.eof()) {
-        if ( count == 0 ) {
-          // First line defines position in the world
-          ifile >> world_location[0] >> world_location[1]
-                >> world_location[2] >> world_sigma[0]
-                >> world_sigma[1] >> world_sigma[2];
-        } else {
-          // Other lines define position in images
-          std::string temp_name;
-          Vector2 temp_loc;
-          ifile >> temp_name >> temp_loc[0] >> temp_loc[1];
-          measure_locations.push_back( temp_loc );
-          measure_cameras.push_back( temp_name );
-        }
-        count++;
-      }
-      ifile.close();
-
-      // Building Control Point
-      Vector3 xyz = cartography::lon_lat_radius_to_xyz(world_location);
-      vw_out(VerboseDebugMessage,"ba") << "\t\tLocation: "
-                                       << xyz << std::endl;
-      ControlPoint cpoint(ControlPoint::GroundControlPoint);
-      cpoint.set_position(xyz[0],xyz[1],xyz[2]);
-      cpoint.set_sigma(world_sigma[0],world_sigma[1],world_sigma[2]);
-
-      // Adding measures
-      std::vector<Vector2>::iterator m_iter_loc = measure_locations.begin();
-      std::vector<std::string>::iterator m_iter_name = measure_cameras.begin();
-      while ( m_iter_loc != measure_locations.end() ) {
-        LookupType::iterator it = image_lookup.find(*m_iter_name);
-        if ( it != image_lookup.end() ) {
-          vw_out(DebugMessage,"ba") << "\t\tAdded Measure: " << *m_iter_name
-                                    << " #" << it->second << std::endl;
-          ControlMeasure cm( (*m_iter_loc).x(), (*m_iter_loc).y(),
-                             1.0, 1.0, it->second );
-          cpoint.add_measure( cm );
-        } else {
-          vw_out(WarningMessage,"ba") << "\t\tWarning: no image found matching "
-                                      << *m_iter_name << std::endl;
-        }
-        m_iter_loc++;
-        m_iter_name++;
-      }
-
-      // Appended GCP
-      cnet.add_control_point(cpoint);
-      gcp_start++;
-    }
-  }
-
+  /// Adds ground control points from GCP files to an already built
+  /// Control Network. The image names in the GCP files must match the image
+  /// names that were loaded into the CNET's internal indexing.  Each 
+  /// GCP is a line in the file, containing the point
+  /// id, 3D point (as lat,lon,height_above_datum), its sigmas, then,
+  /// for each image, the image file name, pixel measurements, and their sigmas.
+  void add_ground_control_points(ControlNetwork& cnet,
+                                 std::vector<std::string> const& gcp_files,
+                                 cartography::Datum const& datum);
+    
   template <class IterT>
   void add_ground_control_cnets( ControlNetwork& cnet,
-                                 std::vector<std::string> const& image_files,
                                  IterT gcpcnet_start, IterT gcpcnet_end ) {
     namespace fs = boost::filesystem;
+
+    std::vector<std::string> const& image_files = cnet.get_image_list();
 
     // Creating a version of image_files that doesn't contain the path
     typedef std::map<std::string,size_t> LookupType;
@@ -164,15 +101,17 @@ namespace ba {
           if ( it != image_lookup.end() )
             cm.set_image_id(it->second);
           else
-            vw_out(WarningMessage,"ba") << "\t\tWarning: no image found matching "
+            vw_out(WarningMessage,"ba") << "No input image found matching "
                                         << cm.serial() << std::endl;
         }
 
         if ( failed_to_index )
           continue;
         cp.set_type( ControlPoint::GroundControlPoint );
-        cnet.add_control_point(cp);
-        vw_out(DebugMessage,"ba") << "\t\tAdded GCP: " << cp.position() << "\n";
+        if (cp.size() > 0) {
+          cnet.add_control_point(cp);
+          vw_out(DebugMessage,"ba") << "\t\tAdded GCP: " << cp.position() << "\n";
+        }
       }
 
       gcpcnet_start++;

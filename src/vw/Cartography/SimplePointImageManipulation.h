@@ -18,10 +18,11 @@
 
 #ifndef __VW_CARTOGRAPHY_SIMPLEPOINTIMAGEMANIPLULATION_H__
 #define __VW_CARTOGRAPHY_SIMPLEPOINTIMAGEMANIPLULATION_H__
-
+/*
 #include <cmath>
 #include <vw/Math/Vector.h>
 #include <vw/Math/Functors.h>
+// TODO: There may be some strange cartography - image dependency!
 #include <vw/Image/PerPixelViews.h>
 #include <vw/Image/ImageViewBase.h>
 
@@ -31,12 +32,15 @@
 /// Vector3 that contain xyz or lon, lat, altitude triples. These functions
 /// should stand alone, and not use GeoReferences.
 
+// TODO: THESE ARE NOT ACCURATE
+//       Is there any reason to use these????
+
 namespace vw {
 namespace cartography {
 
   // ---------------- XYZ to LON LAT ALT CONVERSION ------------------
 
-
+  /// GCC to GDC conversion with elevation being distance from 0,0,0
   class XYZtoLonLatRadFunctor : public UnaryReturnSameType {
     bool m_east_positive;
     bool m_centered_on_zero; // Use the range [-180,180] otherwise [0,360]
@@ -81,6 +85,7 @@ namespace cartography {
     }
   };
 
+  /// GDC to GCC conversion with elevation being distance from 0,0,0
   class LonLatRadToXYZFunctor : public UnaryReturnSameType {
     bool m_east_positive;
   public:
@@ -178,5 +183,5 @@ namespace cartography {
   }
 
 }} // namespace vw::cartography
-
+*/
 #endif

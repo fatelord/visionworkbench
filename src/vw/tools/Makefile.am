@@ -23,7 +23,7 @@
 # For simplicity, these example applications depend on exceptions
 if ENABLE_EXCEPTIONS
 
-include_HEADERS = Common.h
+include_HEADERS = Common.h hillshade.h
 libvwTools_la_SOURCES = Common.cc
 libvwTools_la_LIBADD = @PKG_TOOLS_LIBS@
 libvwTools_la_LDFLAGS = @VW_LDFLAGS@ $(LIBTOOL_LIB_FLAGS)
@@ -34,19 +34,34 @@ noinst_LIBRARIES =
 
 # Command-line tools based on the Camera module
 if MAKE_MODULE_CAMERA
-camera_progs = print_exif bayer
+camera_progs = undistort_image convert_pinhole_model
+
+if MAKE_APP_LEGACY
+camera_progs += print_exif bayer
+endif
+
 # Prints out an image's EXIF headers
 print_exif_SOURCES = print_exif.cc
 print_exif_LDADD = @PKG_CAMERA_LIBS@ $(COMMON_LIBS)
+
+
 # Applies an inverse Bayer filter to a raw camera image
 bayer_SOURCES = bayer.cc
 bayer_LDADD = @PKG_CAMERA_LIBS@ $(COMMON_LIBS)
+
+# Correct pinhole camera lens distortion
+undistort_image_SOURCES = undistort_image.cc
+undistort_image_LDADD = @PKG_VW_LIBS@ @PKG_CARTOGRAPHY_LIBS@ @PKG_CAMERA_LIBS@ $(COMMON_LIBS)
+
+# Convert a pinhole model to a different type
+convert_pinhole_model_SOURCES = convert_pinhole_model.cc
+convert_pinhole_model_LDADD = @PKG_CAMERA_LIBS@ $(COMMON_LIBS)
 endif
 
 # Command-line tools based on the Cartography module
 if MAKE_MODULE_CARTOGRAPHY
 # Converts a DEM to a simple shaded-relief map
-hillshade_SOURCES = hillshade.cc
+hillshade_SOURCES = hillshade.cc hillshade.h
 hillshade_LDADD = @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
 # Converts a DEM to a simple color map
 colormap_SOURCES = colormap.cc
@@ -57,13 +72,19 @@ slopemap_LDADD = @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
 # Adds or adjusts an image's georeferencing information
 georef_SOURCES = georef.cc
 georef_LDADD = @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
+# Adds or adjusts an image's georeferencing information
+georefquery_SOURCES = georef_query.cc
+georefquery_LDADD = @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
 # Fades an image's alpha channel for blending
 grassfirealpha_SOURCES = grassfirealpha.cc
 grassfirealpha_LDADD = @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
 if HAVE_PKG_GDAL
 cart_gdal_progs = georef hillshade
 endif
-cartography_progs = colormap $(cart_gdal_progs) slopemap grassfirealpha
+cartography_progs = colormap $(cart_gdal_progs) georefquery
+if MAKE_APP_LEGACY
+cartography_progs += slopemap grassfirealpha
+endif
 endif
 
 # Command-line tools based on the HDR module
@@ -80,13 +101,16 @@ endif
 # Command-line tools based on the InterestPoint module
 if MAKE_MODULE_INTERESTPOINT
 if HAVE_PKG_LAPACK
-interestpoint_progs = ipalign ipmatch ipfind learnpca
+interestpoint_progs = ipalign ipmatch ipfind
+if MAKE_APP_LEGACY
+interestpoint_progs += learnpca
+endif
 #
 ipfind_SOURCES = ipfind.cc
 ipfind_LDADD = @PKG_INTERESTPOINT_LIBS@ $(COMMON_LIBS)
 #
 ipalign_SOURCES = ipalign.cc
-ipalign_LDADD = @PKG_INTERESTPOINT_LIBS@ $(COMMON_LIBS)
+ipalign_LDADD = @PKG_INTERESTPOINT_LIBS@ @PKG_CAMERA_LIBS@ $(COMMON_LIBS)
 #
 ipmatch_SOURCES = ipmatch.cc
 ipmatch_LDADD = @PKG_INTERESTPOINT_LIBS@ $(COMMON_LIBS)
@@ -99,17 +123,22 @@ endif
 
 # Command-line tools based on the Mosaic module
 if MAKE_MODULE_MOSAIC
+if MAKE_APP_LEGACY
 mosaic_progs = blend
 # Blends multiple images into a composite
 blend_SOURCES = blend.cc
 blend_LDADD = @PKG_MOSAIC_LIBS@ $(COMMON_LIBS)
+endif
 endif
 
 # Command-line tools based on the Cartography and Mosaic modules
 if MAKE_MODULE_CARTOGRAPHY
 if MAKE_MODULE_MOSAIC
 if HAVE_PKG_GDAL
-cart_mos_progs = image2qtree geoblend image2toast
+cart_mos_progs = image2qtree
+if MAKE_APP_LEGACY
+cart_mos_progs += image2toast
+endif
 
 # Generates a quadtree of some sort from a georeferenced image
 image2qtree_SOURCES = image2qtree.cc
@@ -138,25 +167,6 @@ libimage2qtree_rgbai16_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelRGBA -DCHAN
 libimage2qtree_rgbaf32_a_SOURCES = image2qtree_help.cc
 libimage2qtree_rgbaf32_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelRGBA -DCHANNEL_TYPE=float32
 
-
-# Creates a blended composite from multiple georeferenced images
-geoblend_SOURCES = geoblend.cc
-geoblend_ARCHIVES = libgeoblend_gray.a libgeoblend_graya.a     \
-        libgeoblend_rgb.a  libgeoblend_rgba.a
-geoblend_LDADD = $(geoblend_ARCHIVES) @PKG_CARTOGRAPHY_LIBS@   \
-        @PKG_MOSAIC_LIBS@ $(COMMON_LIBS)
-# The many archive files are to help speed compile times and to lower
-# the overall memory requirement during compiling.
-noinst_LIBRARIES += $(geoblend_ARCHIVES)
-libgeoblend_gray_a_SOURCES = geoblend_help.cc
-libgeoblend_gray_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelGray
-libgeoblend_graya_a_SOURCES = geoblend_help.cc
-libgeoblend_graya_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelGrayA
-libgeoblend_rgb_a_SOURCES = geoblend_help.cc
-libgeoblend_rgb_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelRGB
-libgeoblend_rgba_a_SOURCES = geoblend_help.cc
-libgeoblend_rgba_a_CPPFLAGS = $(AM_CPPFLAGS) -DPIXEL_TYPE=PixelRGBA
-
 # Creates a TOAST quadtree from multiple georeferenced images
 image2toast_SOURCES = image2toast.cc
 image2toast_LDADD = @PKG_CARTOGRAPHY_LIBS@ @PKG_MOSAIC_LIBS@ $(COMMON_LIBS)
@@ -170,54 +180,42 @@ if MAKE_MODULE_INTERESTPOINT
 stereo_progs = correlate
 # Apply the block stereo correlator to two images, producing a disparity map
 correlate_SOURCES = correlate.cc
-correlate_LDADD = @PKG_STEREO_LIBS@ @PKG_INTERESTPOINT_LIBS@ $(COMMON_LIBS)
-endif
-endif
-
-# Command-line tools based on the GPU module
-if MAKE_MODULE_GPU
-gpu_progs = gpu_correlate
-# A GPU-based version of the Stereo correlator
-gpu_correlate_SOURCES = gpu_correlate.cc
-gpu_correlate_LDADD = @PKG_GPU_LIBS@ $(COMMON_LIBS)
-endif
-
-# Bundle adjustment test programs
-if MAKE_MODULE_CAMERA
-if MAKE_MODULE_STEREO
-if MAKE_MODULE_INTERESTPOINT
-if MAKE_MODULE_BUNDLEADJUSTMENT
-batest_progs = ba_test make_ba_test_data
-ba_test_SOURCES = ba_test.cc
-ba_test_LDADD = @PKG_BUNDLEADJUSTMENT_LIBS@ $(COMMON_LIBS)
-make_ba_test_data_SOURCES = make_ba_test_data.cc
-make_ba_test_data_LDADD = @PKG_BUNDLEADJUSTMENT_LIBS@ $(COMMON_LIBS)
-endif
-endif
+correlate_LDADD = @PKG_VW_LIBS@ @PKG_STEREO_LIBS@ @PKG_INTERESTPOINT_LIBS@ @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
 endif
 endif
 
 # Contour generation program
 if HAVE_PKG_CAIROMM
+if MAKE_APP_LEGACY
 contourgen_progs = contourgen
 contourgen_SOURCES = contour.cpp FitCurves.cpp contourgen.cc contour.h
 contourgen_CPPFLAGS = @VW_CPPFLAGS@ @PKG_CAIROMM_CPPFLAGS@
 contourgen_LDADD = $(COMMON_LIBS) @PKG_CAIROMM_LIBS@
 endif
+endif
 
 if MAKE_MODULE_MOSAIC
+if MAKE_APP_LEGACY
 doc_generate_progs = doc-generate
 doc_generate_SOURCES = doc-generate.cc
 doc_generate_LDADD   = @PKG_VW_LIBS@ @PKG_MOSAIC_LIBS@
 endif
+endif
+
+if MAKE_MODULE_FLOOD_DETECT
+detect_water_progs = detect_water clean_sentinel1_borders
+detect_water_SOURCES = detect_water.cc multispectral.h radar.h flood_common.h
+detect_water_LDADD   = @PKG_VW_LIBS@ @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
+clean_sentinel1_borders_SOURCES = clean_sentinel1_borders.cc flood_common.h
+clean_sentinel1_borders_LDADD   = @PKG_VW_LIBS@ @PKG_CARTOGRAPHY_LIBS@ $(COMMON_LIBS)
+endif
 
 bin_PROGRAMS = $(camera_progs) $(cartography_progs) $(hdr_progs) \
                $(interestpoint_progs) $(mosaic_progs)            \
-               $(cart_mos_progs) $(stereo_progs) $(gpu_progs)    \
-               $(contourgen_progs)
+               $(cart_mos_progs) $(stereo_progs)     \
+               $(contourgen_progs) $(detect_water_progs)
 
-noinst_PROGRAMS      = $(doc_generate_progs) $(batest_progs)
-dist_noinst_SCRIPTS  = ba_unit_test run_ba_tests
+noinst_PROGRAMS      = $(doc_generate_progs)
 
 endif
 
@@ -227,8 +225,6 @@ endif
 
 AM_CPPFLAGS = @VW_CPPFLAGS@
 AM_LDFLAGS = @VW_LDFLAGS@
-
-EXTRA_DIST = run_ba_tests_lib ba_test.cfg.example ba_test_plan.txt.example
 
 includedir = $(prefix)/include/vw/tools
 

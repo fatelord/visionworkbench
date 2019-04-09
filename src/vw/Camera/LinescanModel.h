@@ -25,100 +25,44 @@
 #define _VW_CAMERA_LINESCAN_MODEL_H_
 
 #include <vw/Math/Quaternion.h>
+#include <vw/Math/LevenbergMarquardt.h>
 #include <vw/Camera/CameraModel.h>
 
 namespace vw {
 namespace camera {
 
-  template <class PositionFuncT, class PoseFuncT>
-  class LinescanModel : public CameraModel {
+  /// This is a generic line scan camera model that can be derived
+  /// from to help implement specific cameras.  Some parts (velocity
+  /// and atmospheric correction) currently only work for Earth.
+  ///
+  /// This expects the pose to be a rotation from the camera frame to
+  /// the world frame. The position is a the camera's location in the
+  /// world frame.
+  ///
+  /// The intrinisic model expects +Z to point out the camera. +X is
+  /// the column direction of the image and is perpendicular to
+  /// direction of flight. +Y is the row direction of the image (down
+  /// the image); it is also the flight direction.  If this is not 
+  /// accurate for your camera you can apply a rotation in PoseFuncT.
 
-    // Extrinsics
-    PositionFuncT m_position_func;
-    PoseFuncT m_pose_func;
-
-    // Intrinsics
-    int m_number_of_lines;
-    int m_samples_per_line;
-    int m_sample_offset;
-    double m_focal_length;
-    double m_across_scan_pixel_size;
-    double m_along_scan_pixel_size;
-    std::vector<double> m_line_times;
-    Vector3 m_pointing_vec;
-    Vector3 m_u_vec;
+  class LinescanModel : public vw::camera::CameraModel {
 
   public:
     //------------------------------------------------------------------
     // Constructors / Destructors
     //------------------------------------------------------------------
-
-    /// This version of the constructor assumes that the line
-    /// integration varies one each scanline of the image.  The
-    /// line_integration_times vector must be equal to the
-    /// number_of_lines
-    LinescanModel( int number_of_lines,
-                   int samples_per_line,
-                   int sample_offset,
-                   double focal_length,
-                   double along_scan_pixel_size,
-                   double across_scan_pixel_size,
-                   std::vector<double> const& line_times,
-                   Vector3 pointing_vec,
-                   Vector3 u_vec,
-                   PositionFuncT const& position_func,
-                   PoseFuncT const& pose_func) : m_position_func(position_func),
-                                                 m_pose_func(pose_func) {
-
-      VW_ASSERT(int(line_times.size()) == number_of_lines,
-                ArgumentErr() << "LinescanModel: number of line integration times does not match the number of scanlines.\n");
-
-      // Intrinsics
-      m_number_of_lines = number_of_lines;
-      m_samples_per_line = samples_per_line;
-      m_sample_offset = sample_offset;
-      m_focal_length = focal_length;
-      m_along_scan_pixel_size = along_scan_pixel_size;
-      m_across_scan_pixel_size = across_scan_pixel_size;
-
-      m_line_times = line_times;
-
-      m_pointing_vec = normalize(pointing_vec);
-      m_u_vec = normalize(u_vec);
-    }
-
-    /// This version of the constructor assumes that the line
-    /// integration time is consistent throughout the image.
-    LinescanModel( int number_of_lines,
-                   int samples_per_line,
-                   int sample_offset,
-                   double focal_length,
-                   double along_scan_pixel_size,
-                   double across_scan_pixel_size,
-                   double line_integration_time,
-                   Vector3 pointing_vec,
-                   Vector3 u_vec,
-                   PositionFuncT const& position_func,
-                   PoseFuncT const& pose_func) : m_position_func(position_func),
-                                                 m_pose_func(pose_func) {
-
-      // Intrinsics
-      m_number_of_lines = number_of_lines;
-      m_samples_per_line = samples_per_line;
-      m_sample_offset = sample_offset;
-      m_focal_length = focal_length;
-      m_along_scan_pixel_size = along_scan_pixel_size;
-      m_across_scan_pixel_size = across_scan_pixel_size;
-
-      m_line_times.resize(number_of_lines);
-      double sum = 0;
-      for (int i = 0; i < number_of_lines; ++i) {
-        m_line_times[i] = sum;
-        sum += line_integration_time;
-      }
-
-      m_pointing_vec = normalize(pointing_vec);
-      m_u_vec = normalize(u_vec);
+    LinescanModel(Vector2i const& image_size,
+		              bool            correct_velocity_aberration,
+		              bool            correct_atmospheric_refraction) :
+      m_image_size(image_size), 
+      m_correct_velocity_aberration(correct_velocity_aberration),
+      m_correct_atmospheric_refraction(correct_atmospheric_refraction){
+      
+      // Set default values for these constants which can be overridden later on.
+      const double DEFAULT_EARTH_RADIUS      = 6371000.0;  // In meters.
+      const double DEFAULT_SURFACE_ELEVATION = 0.0;
+      m_mean_earth_radius      = DEFAULT_EARTH_RADIUS;
+      m_mean_surface_elevation = DEFAULT_SURFACE_ELEVATION;
     }
 
     virtual ~LinescanModel() {}
@@ -127,128 +71,89 @@ namespace camera {
     //------------------------------------------------------------------
     // Interface
     //------------------------------------------------------------------
-    virtual Vector2 point_to_pixel(Vector3 const& /*point*/) const {
-      vw_throw( vw::NoImplErr() << "LinescanModel::point_to_pixel is not yet implemented." );
-      return Vector2(); // never reached
+    
+    // -- This set of functions implements virtual functions from CameraModel.h --
+    
+    /// Get the pixel that observes a point in world coordinates.
+    virtual Vector2 point_to_pixel (Vector3 const& point) const;
+
+    /// Gives a pointing vector in the world coordinates.
+    virtual Vector3 pixel_to_vector(Vector2 const& pix) const;
+
+    /// Gives the camera position in world coordinates.
+    virtual Vector3 camera_center(Vector2 const& pix) const {
+      return get_camera_center_at_time(get_time_at_line(pix.y()));
     }
 
-    /// Given a pixel in image coordinates, what is the pointing
-    /// vector in 3-space if you apply the camera model.
-    ///
-    /// Important Note: For linear pushbroom sensors, the orientation
-    /// of the image is important.  In the Camera module we adopt the
-    /// following convention for pushbroom imagers:
-    ///
-    /// u is the crosstrack (i.e., perspective) direction
-    /// v is the downtrack (i.e., orthographic) direction
-    virtual Vector3 pixel_to_vector(Vector2 const& pix) const {
-      double u = pix[0], v = pix[1];
-
-      // Check to make sure that this is a valid pixel
-      if (int(round(v)) < 0 || int(round(v)) >= int(m_line_times.size()))
-        vw_throw( PixelToRayErr() << "LinescanModel: requested pixel "
-                  << pix << " is not on a valid scanline." );
-
-      // The view_matrix takes vectors from the camera (extrinsic)
-      // coordinate system to the world frame
-      //
-      // The position and veloctiy are not actually needed, since we are
-      // purely interested in returning the direction of the ray at this
-      // point and not its origin.
-      //
-      // The v pixel need not be an integer in every case, therefore
-      // we need to linearly interpolate line times that fall in
-      // between pixels.
-      int y = int(floor(pix[1]));
-      double normy = pix[1] - y;
-      double approx_line_time =
-        double( m_line_times[y] + (m_line_times[y+1] - m_line_times[y]) * normy );
-
-      // The viewplane is the [pointing_vec cross u_vec] plane of the
-      // camera coordinate system.  Assuming the origin of the
-      // coordinate system is at the center of projection, the image
-      // plane is at pointing_vec = +f, and the pixel position in
-      // camera coordinates is:
-      double pixel_pos_u = (u + m_sample_offset) * m_across_scan_pixel_size;
-      Vector<double, 3> pixel_direction =
-        pixel_pos_u * m_u_vec + m_focal_length * m_pointing_vec;
-
-      // Transform to world coordinates using the rigid rotation
-      return normalize(m_pose_func(approx_line_time).rotate(pixel_direction));
+    /// Gives a pose vector which represents the rotation from camera to world units
+    virtual Quat camera_pose(Vector2 const& pix) const {
+      return get_camera_pose_at_time(get_time_at_line(pix.y()));
     }
 
-    virtual Vector3 camera_center(Vector2 const& pix = Vector2() ) const {
-      // Check to make sure that this is a valid pixel
-      if (int(round(pix[1])) < 0 ||
-          int(round(pix[1])) >= int(m_line_times.size()))
-        vw_throw( PixelToRayErr() << "LinescanModel: requested pixel " << pix << " is not on a valid scanline." );
+    // -- These are new functions --
 
-      // The v pixel need not be an integer in every case, therefore
-      // we need to linearly interpolate line times that fall in
-      // between pixels.
-      int y = int(floor(pix[1]));
-      double normy = pix[1] - y;
-      double approx_line_time = double( m_line_times[y] + (m_line_times[y+1] - m_line_times[y]) * normy );
-
-      return m_position_func(approx_line_time);
+    /// Returns the image size in pixels
+    Vector2i get_image_size() const { return m_image_size; }
+    
+    int samples_per_line() const { return m_image_size[0]; }
+    int number_of_lines () const { return m_image_size[1]; }
+    
+    /// Gives the camera velocity in world coordinates.
+    Vector3 camera_velocity(vw::Vector2 const& pix) const {
+      return get_camera_velocity_at_time(get_time_at_line(pix.y()));
     }
+    
+    // New functions for Linescan derived classes.
+    // - Most of these deal with the fact that the camera is moving while
+    //   acquiring the image.
+    // - Derived classes need to implement these so that the functions inherited from
+    //   CameraModel will work.  Consider using the functors in Extrinsics.h.
 
-    /// Returns the pose (as a quaternion) of the camera for a given
-    /// pixel. Pose is the rotation from camera coordinates to world.
-    virtual Quaternion<double> camera_pose(Vector2 const& pix) const {
-      // Check to make sure that this is a valid pixel
-      if (int(round(pix[1])) < 0 || int(round(pix[1])) >= int(m_line_times.size()))
-        vw_throw( PixelToRayErr() << "LinescanModel::camera_pose(): requested pixel " << pix << " is not on a valid scanline." );
+    /// Gives the camera center at a time.
+    virtual Vector3 get_camera_center_at_time  (double time) const = 0;
+    /// Gives the camera velocity at a time.
+    virtual Vector3 get_camera_velocity_at_time(double time) const = 0;
+    /// Get the pose at a time.
+    virtual Quat    get_camera_pose_at_time    (double time) const = 0;
+    /// Return the computed time for a given line.
+    virtual double  get_time_at_line           (double line) const = 0;
 
-      // The v pixel need not be an integer in every case, therefore
-      // we need to linearly interpolate line times that fall in
-      // between pixels.
-      int y = int(floor(pix[1]));
-      double normy = pix[1] - y;
-      double approx_line_time = double( m_line_times[y] + (m_line_times[y+1] - m_line_times[y]) * normy );
+    /// As pixel_to_vector, but in the local camera frame.
+    virtual Vector3 get_local_pixel_vector(vw::Vector2 const& pix) const = 0;
 
-      return m_pose_func(approx_line_time);
-    }
 
-    //------------------------------------------------------------------
-    // Public Methods
-    //------------------------------------------------------------------
+    // Here we use an initial guess for the line number
+    // - This class provides a generic implementation but specific
+    //   linescan cameras may be able to use more specific implementation.
+    virtual Vector2 point_to_pixel(vw::Vector3 const& point, double starty) const;
 
-    // Accessors
-    virtual double number_of_lines() const { return m_number_of_lines; }
-    virtual double samples_per_line() const { return m_samples_per_line; }
-    virtual double sample_offset() const { return m_sample_offset; }
-    virtual double focal_length() const { return m_focal_length; }
-    virtual double along_scan_pixel_size() const { return m_along_scan_pixel_size; }
-    virtual double across_scan_pixel_size() const { return m_across_scan_pixel_size; }
-    virtual std::vector<double> line_times() const { return m_line_times; }
-    virtual Vector3 camera_position(double t) const { return m_position_func(t); }
-    virtual Quaternion<double> camera_pose(double t) const { return m_pose_func(t); }
+  protected:
 
-    virtual void set_number_of_lines(int val) { m_number_of_lines = val; }
-    virtual void set_samples_per_line(int val) { m_samples_per_line = val; }
-    virtual void set_sample_offset(int val) { m_sample_offset = val; }
-    virtual void set_along_scan_pixel_size(double val) { m_along_scan_pixel_size = val; }
-    virtual void set_across_scan_pixel_size(double val) {m_across_scan_pixel_size = val; }
-    virtual void set_focal_length(double val) {m_focal_length = val; }
-    virtual void set_line_times(std::vector<double> val) { m_line_times = val; }
-  };
+    /// Image size in pixels: [num lines, num samples]
+    Vector2i m_image_size;      
 
+    double m_mean_earth_radius;
+    double m_mean_surface_elevation;
+
+    /// Set this flag to enable velocity aberration correction.
+    /// - For satellites this makes a big difference, make sure it is set!
+    bool m_correct_velocity_aberration;
+    
+    /// Set this flag to enable atmospheric refraction correction.
+    bool m_correct_atmospheric_refraction;
+
+  protected:
+
+    /// Returns the radius of the Earth under the current camera position.
+    double get_earth_radius() const;
+
+  }; // End class LinescanModel
+  
+/*
   /// Output stream method for printing a summary of the linear
   /// pushbroom camera model parameters.
-  template <class PositionFuncT, class PoseFuncT>
-  std::ostream& operator<<( std::ostream& os, LinescanModel<PositionFuncT, PoseFuncT> const& camera_model) {
-    os << "\n-------------------- Linescan Camera Model -------------------\n\n";
-    os << " Camera center @ origin :   " << camera_model.camera_center(Vector2(0,0)) << "\n";
-    os << " Number of Lines        :   " << camera_model.number_of_lines() << "\n";
-    os << " Samples per Line       :   " << camera_model.samples_per_line() << "\n";
-    os << " Sample Offset          :   " << camera_model.sample_offset() << "\n";
-    os << " Focal Length           :   " << camera_model.focal_length() << "\n";
-    os << " Across Scan Pixel Size :   " << camera_model.across_scan_pixel_size() << "\n";
-    os << " Along Scan Pixel Size  :   " << camera_model.along_scan_pixel_size() << "\n";
-    os << "\n------------------------------------------------------------------------\n\n";
-    return os;
-  }
+  std::ostream& operator<<( std::ostream& os, LinescanModel const& camera_model);
+*/
 
 }}      // namespace vw::camera
 

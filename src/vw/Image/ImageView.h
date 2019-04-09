@@ -50,6 +50,15 @@ namespace vw {
   /// MemoryImageView, or StandardImageView, but it is so ubiquitous
   /// that we decided to keep the name short.
   ///
+  /// - WARNING: Never refer to these objects by reference!  The
+  ///            behaviour is undefined.
+  /// - The user manual discourages users from having multiple PLANES.
+  ///   This is distinct from multiple CHANNELS which is achieved by
+  ///   using a pixel type container object with multiple values, such
+  ///   as Vector3.  The manual does not address why this is but it is
+  ///   safe to say that using planes is not well supported.
+  /// - Because of the above, image data is stored internally in 
+  ///   INTERLEAVED (BIP) format.
   template <class PixelT>
   class ImageView : public ImageViewBase<ImageView<PixelT> >
   {
@@ -57,10 +66,10 @@ namespace vw {
     // another ImageView.
     BOOST_STATIC_ASSERT( !IsImageView<PixelT>::value );
 
-    boost::shared_array<PixelT> m_data;
-    int32 m_cols, m_rows, m_planes;
-    PixelT *m_origin;
-    ssize_t m_rstride, m_pstride;
+    boost::shared_array<PixelT> m_data; ///< Underlying data pointer
+    int32 m_cols, m_rows, m_planes;     ///< Data dimensions
+    PixelT *m_origin;                   ///< Generally points to m_data.get()
+    ssize_t m_rstride, m_pstride;       ///< Row stride and plane stride in PixelT counts.
 
   public:
     /// The base type of the image.
@@ -135,15 +144,10 @@ namespace vw {
       return *this;
     }
 
-    /// Returns the number of columns in the image.
-    inline int32 cols() const { return m_cols; }
-
-    /// Returns the number of rows in the image.
-    inline int32 rows() const { return m_rows; }
-
-    /// Returns the number of planes in the image.
-    inline int32 planes() const { return m_planes; }
-
+    inline int32 cols  () const { return m_cols;   } ///< Returns the number of columns in the image.
+    inline int32 rows  () const { return m_rows;   } ///< Returns the number of rows in the image.
+    inline int32 planes() const { return m_planes; } ///< Returns the number of planes in the image.
+    
     /// Returns a pixel_accessor pointing to the top-left corner of the first plane.
     inline pixel_accessor origin() const {
 #if defined(VW_ENABLE_BOUNDS_CHECK) && (VW_ENABLE_BOUNDS_CHECK==1)
@@ -155,6 +159,7 @@ namespace vw {
     }
 
     /// Returns the pixel at the given position in the given plane.
+    /// - See the warning about using planes at the top of the class.
     inline result_type operator()( int32 col, int32 row, int32 plane=0 ) const {
 #if defined(VW_ENABLE_BOUNDS_CHECK) && (VW_ENABLE_BOUNDS_CHECK==1)
       if (col < 0 || col >= cols() || row < 0 || row >= rows() || plane < 0 || plane >= planes())
@@ -165,30 +170,34 @@ namespace vw {
 
     /// Adjusts the size of the image, allocating a new buffer if the size has changed.
     void set_size( int32 cols, int32 rows, int32 planes = 1 ) {
-      // if none of cols, rows, or planes are larger than this, the
-      // product of the three cannot overflow a 64-bit signed number
-      // 2^26 * 2^26 * 2^10  = 2^62 < 2^63-1
-      static const int32 MAX_PIXEL_SIZE  = 1<<26;
-      static const int32 MAX_PLANE_COUNT = 1<<10;
-      if( cols==m_cols && rows==m_rows && planes==m_planes ) return;
+      // These sizes are pretty large for in-memory images and should only come up
+      //  in the case of bugs in the code.
+      static const int32  MAX_PIXEL_SIZE   = 80000;
+      static const int32  MAX_PLANE_COUNT  = 1024; // Really should never be using these anyways
+      static const uint64 MAX_TOTAL_PIXELS = 6400000000;
+      
+      // Check if we already have the correct size
+      if( cols==m_cols && rows==m_rows && planes==m_planes )
+          return;
 
-      // This check can go away when the ImageViewBase classes handle these as unsigned
-      VW_ASSERT(cols >= 0 && rows >= 0 && planes >= 0,
-          ArgumentErr() << "Cannot allocate image with negative pixel count (you requested " << cols << " x "  << rows << " x " << planes << ")");
+      VW_ASSERT(cols >= 0 && rows >= 0 && planes >= 0, // No negative sizes!
+                ArgumentErr() << "Cannot allocate image with negative pixel count (you requested " 
+                              << cols << " x "  << rows << " x " << planes << ")");
 
-      // see comment above on MAX_PIXEL_SIZE.
+      // Make sure the image is not too big.
       VW_ASSERT(cols < MAX_PIXEL_SIZE && rows < MAX_PIXEL_SIZE,
-          ArgumentErr() << "Refusing to allocate an image larger than " << MAX_PIXEL_SIZE-1 << " pixels on a side (you requested " << cols << " x " << rows << ")");
-
+          ArgumentErr() << "Refusing to allocate an image larger than " << MAX_PIXEL_SIZE-1 
+                        << " pixels on a side (you requested " << cols << " x " << rows << ")");
       VW_ASSERT(planes < MAX_PLANE_COUNT,
-          ArgumentErr() << "Refusing to allocate an image with more than " << MAX_PLANE_COUNT-1 << " planes on a side (you requested " << planes << ")");
+          ArgumentErr() << "Refusing to allocate an image with more than " << MAX_PLANE_COUNT-1 
+                        << " planes (you requested " << planes << ")");
 
       uint64 size64 = uint64(cols) * uint64(rows) * uint64(planes);
 
-      // This might trip on 32-bit platforms
-      VW_ASSERT(size64 < std::numeric_limits<size_t>::max(),
-          ArgumentErr() << "Cannot allocate enough memory for a " << cols << "x"  << rows << "x" << planes << " image: too many pixels!");
-
+      VW_ASSERT(size64 < MAX_TOTAL_PIXELS,
+          ArgumentErr() << "Refusing to allocate an image with more than " << MAX_TOTAL_PIXELS 
+                        << " pixels (you requested " << size64 << ")");
+      
       size_t size = size64;
 
       if( size==0 )
@@ -197,16 +206,18 @@ namespace vw {
         boost::shared_array<PixelT> data( new (std::nothrow) PixelT[size] );
         if (!data) {
           // print it and throw it for the benefit of OSX, which doesn't print the exception what() on terminate()
-          VW_OUT(ErrorMessage)   << "Cannot allocate enough memory for a " << cols << "x" << rows << "x" << planes << " image: too many bytes!" << std::endl;
-          vw_throw(ArgumentErr() << "Cannot allocate enough memory for a " << cols << "x" << rows << "x" << planes << " image: too many bytes!");
+          VW_OUT(ErrorMessage)   << "Cannot allocate enough memory for a " 
+                                 << cols << "x" << rows << "x" << planes << " image: too many bytes!" << std::endl;
+          vw_throw(ArgumentErr() << "Cannot allocate enough memory for a " 
+                                 << cols << "x" << rows << "x" << planes << " image: too many bytes!");
         }
         m_data = data;
       }
 
-      m_cols = cols;
-      m_rows = rows;
-      m_planes = planes;
-      m_origin = m_data.get();
+      m_cols    = cols;
+      m_rows    = rows;
+      m_planes  = planes;
+      m_origin  = m_data.get();
       m_rstride = cols;
       m_pstride = rows*cols;
 
@@ -232,8 +243,8 @@ namespace vw {
     /// Resets to an empty image with zero size.
     void reset() {
       m_data.reset();
-      m_cols = m_rows = m_planes = 0;
-      m_origin = 0;
+      m_cols    = m_rows = m_planes = 0;
+      m_origin  = 0;
       m_rstride = m_pstride = 0;
     }
 
@@ -246,8 +257,7 @@ namespace vw {
       return !(!m_data);
     }
 
-    /// Returns true if no other ImageView object is sharing
-    /// this block of memory.
+    /// Returns true if no other ImageView object is sharing this block of memory.
     bool unique() const {
       return (!m_data) || m_data.unique();
     }
@@ -255,8 +265,8 @@ namespace vw {
     /// Returns an ImageBuffer describing the image data.
     ImageBuffer buffer() const {
       ImageBuffer buffer;
-      buffer.data = data();
-      buffer.format = base_type::format();
+      buffer.data    = data();
+      buffer.format  = base_type::format();
       buffer.cstride = sizeof(PixelT);
       buffer.rstride = sizeof(PixelT)*cols();
       buffer.pstride = sizeof(PixelT)*cols()*rows();

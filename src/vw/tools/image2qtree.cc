@@ -16,7 +16,7 @@
 // __END_LICENSE__
 
 
-/// \file image2geotree.cc
+/// \file image2qtree.cc
 ///
 /// This program takes a georeferenced image as its input, and outputs
 /// a quadtree for that image that is viewable in various terrain display
@@ -24,6 +24,7 @@
 /// in KML, TMS, Uniview, and Google Maps formats.
 
 #include <vw/tools/image2qtree.h>
+#include <vw/Cartography/GeoReferenceUtils.h>
 #include <boost/program_options.hpp>
 
 using namespace vw;
@@ -32,29 +33,13 @@ using namespace vw::cartography;
 using namespace vw::mosaic;
 using std::string;
 using vw::tools::Usage;
-using vw::tools::Tristate;
 using std::cout;
 using std::cerr;
 using std::endl;
 
 namespace po = boost::program_options;
 
-VW_DEFINE_ENUM_DEF(Channel, 5, (NONE, UINT8, UINT16, INT16, FLOAT));
-VW_DEFINE_ENUM_DEF(Mode, 7, (NONE, KML, TMS, UNIVIEW, GMAP, CELESTIA, GIGAPAN));
-VW_DEFINE_ENUM_DEF(DatumOverride, 5, (NONE, WGS84, LUNAR, MARS, SPHERE))
-VW_DEFINE_ENUM_DEF(Projection, 11, (
-                                    DEFAULT,
-                                    NONE,
-                                    SINUSOIDAL,
-                                    MERCATOR,
-                                    TRANSVERSE_MERCATOR,
-                                    ORTHOGRAPHIC,
-                                    STEREOGRAPHIC,
-                                    LAMBERT_AZIMUTHAL,
-                                    LAMBERT_CONFORMAL_CONIC,
-                                    UTM,
-                                    PLATE_CARREE))
-
+// Call the correct version of the do_mosaic function based on pixel type.
 #define SWITCH_ON_CHANNEL_TYPE( PIXELTYPE )                             \
   switch (fmt.channel_type) {                                           \
   case VW_CHANNEL_UINT8:   do_mosaic_##PIXELTYPE##_uint8(opt,progress); break; \
@@ -63,24 +48,22 @@ VW_DEFINE_ENUM_DEF(Projection, 11, (
   default:                 do_mosaic_##PIXELTYPE##_float32(opt,progress); break; \
   }
 
-int32 compute_resolution(const Mode& p, const GeoTransform& t, const Vector2& v) {
-  switch(p.value()) {
-    case Mode::KML:      return vw::cartography::output::kml::compute_resolution(t,v);
-    case Mode::TMS:      return vw::cartography::output::tms::compute_resolution(t,v);
-    case Mode::UNIVIEW:  return vw::cartography::output::tms::compute_resolution(t,v);
-    case Mode::GMAP:     return vw::cartography::output::tms::compute_resolution(t,v);
-    case Mode::CELESTIA: return vw::cartography::output::tms::compute_resolution(t,v);
-    case Mode::GIGAPAN:  return vw::cartography::output::tms::compute_resolution(t,v);
-    default: vw_throw(LogicErr() << "Asked to compute resolution for unknown profile " << p.string());
-  }
+int32 compute_resolution(const std::string& p, const GeoTransform& t, const Vector2& v) {
+  if (p == "KML")      return vw::cartography::output::kml::compute_resolution(t,v);
+  if (p == "TMS")      return vw::cartography::output::tms::compute_resolution(t,v);
+  if (p == "UNIVIEW")  return vw::cartography::output::tms::compute_resolution(t,v);
+  if (p == "GMAP")     return vw::cartography::output::tms::compute_resolution(t,v);
+  if (p == "CELESTIA") return vw::cartography::output::tms::compute_resolution(t,v);
+  if (p == "GIGAPAN")  return vw::cartography::output::tms::compute_resolution(t,v);
+  vw_throw(LogicErr() << "Asked to compute resolution for unknown quadtree type.");
 }
 
 void get_normalize_vals(boost::shared_ptr<DiskImageResource> file,
                                const Options& opt) {
   DiskImageView<PixelRGB<float> > min_max_file(file);
   float new_lo, new_hi;
-  if ( opt.nodata.set() ) {
-    PixelRGB<float> no_data_value( opt.nodata.value() );
+  if ( opt.nodata_set ) {
+    PixelRGB<float> no_data_value( opt.nodata );
     min_max_channel_values( create_mask(min_max_file,no_data_value), new_lo, new_hi );
   } else if ( file->has_nodata_read() ) {
     PixelRGB<float> no_data_value( file->nodata_read() );
@@ -99,7 +82,7 @@ load_image_georeferences( const Options& opt, int& total_resolution ) {
   georeferences.reserve( opt.input_files.size() );
 
   BOOST_FOREACH(const std::string filename, opt.input_files) {
-    boost::shared_ptr<DiskImageResource> file( DiskImageResource::open(filename) );
+    boost::shared_ptr<DiskImageResource> file( DiskImageResourcePtr(filename) );
     vw_out() << "Adding file " << file->filename() << std::endl;
 
     if( opt.normalize ) get_normalize_vals(file, opt);
@@ -131,8 +114,8 @@ load_image_georeferences( const Options& opt, int& total_resolution ) {
     }
   }
 
-  if(opt.global_resolution.set()) {
-    vw_out(VerboseDebugMessage) << "Overriding calculated resolution " << total_resolution << " with " << opt.global_resolution.value() << std::endl;
+  if(opt.global_resolution > 0) {
+    vw_out(VerboseDebugMessage) << "Overriding calculated resolution " << total_resolution << " with " << opt.global_resolution << std::endl;
     total_resolution = opt.global_resolution;
   }
 
@@ -150,17 +133,13 @@ GeoReference make_input_georef(boost::shared_ptr<DiskImageResource> file,
     fail_read_georef = true;
   }
 
-  switch(opt.datum.type) {
-    case DatumOverride::WGS84: input_georef.set_well_known_geogcs("WGS84");  break;
-    case DatumOverride::LUNAR: input_georef.set_well_known_geogcs("D_MOON"); break;
-    case DatumOverride::MARS:  input_georef.set_well_known_geogcs("D_MARS"); break;
-    case DatumOverride::SPHERE: {
+  if (opt.datum.type == "WGS84") input_georef.set_well_known_geogcs("WGS84" ); 
+  if (opt.datum.type == "LUNAR") input_georef.set_well_known_geogcs("D_MOON");
+  if (opt.datum.type == "MARS" ) input_georef.set_well_known_geogcs("D_MARS");
+  if (opt.datum.type == "SPHERE") {
       cartography::Datum datum("USER SUPPLIED DATUM", "SPHERICAL DATUM", "Reference Meridian",
           opt.datum.sphere_radius, opt.datum.sphere_radius, 0.0);
       input_georef.set_datum(datum);
-      break;
-    }
-    case DatumOverride::NONE: break;
   }
 
   if( opt.manual ) {
@@ -176,20 +155,21 @@ GeoReference make_input_georef(boost::shared_ptr<DiskImageResource> file,
     exit(1);
   }
 
-  switch (opt.proj.type) {
-    case Projection::LAMBERT_AZIMUTHAL:       input_georef.set_lambert_azimuthal(opt.proj.lat,opt.proj.lon); break;
-    case Projection::LAMBERT_CONFORMAL_CONIC: input_georef.set_lambert_conformal(opt.proj.p1, opt.proj.p2, opt.proj.lat, opt.proj.lon); break;
-    case Projection::MERCATOR:                input_georef.set_mercator(opt.proj.lat,opt.proj.lon,opt.proj.scale); break;
-    case Projection::ORTHOGRAPHIC:            input_georef.set_orthographic(opt.proj.lat,opt.proj.lon); break;
-    case Projection::PLATE_CARREE:            input_georef.set_geographic(); break;
-    case Projection::SINUSOIDAL:              input_georef.set_sinusoidal(opt.proj.lon); break;
-    case Projection::STEREOGRAPHIC:           input_georef.set_stereographic(opt.proj.lat,opt.proj.lon,opt.proj.scale); break;
-    case Projection::TRANSVERSE_MERCATOR:     input_georef.set_transverse_mercator(opt.proj.lat,opt.proj.lon,opt.proj.scale); break;
-    case Projection::UTM:                     input_georef.set_UTM( abs(opt.proj.utm_zone), opt.proj.utm_zone > 0 ); break;
-    case Projection::DEFAULT:
-    case Projection::NONE: break;
-  }
+  // If the user passed in georef parameters, process them here
+  if (opt.proj.type == "LAMBERT_AZIMUTHAL") input_georef.set_lambert_azimuthal(opt.proj.lat,opt.proj.lon);
+  if (opt.proj.type == "LAMBERT_CONFORMAL_CONIC") 
+    input_georef.set_lambert_conformal(opt.proj.p1, opt.proj.p2, opt.proj.lat, opt.proj.lon);
+  if (opt.proj.type == "MERCATOR")    input_georef.set_mercator(opt.proj.lat,opt.proj.lon,opt.proj.scale);
+  if (opt.proj.type == "ORTHOGRAPHIC")            input_georef.set_orthographic(opt.proj.lat,opt.proj.lon);
+  if (opt.proj.type == "PLATE_CARREE")            input_georef.set_geographic();
+  if (opt.proj.type == "SINUSOIDAL")              input_georef.set_sinusoidal(opt.proj.lon);
+  if (opt.proj.type == "STEREOGRAPHIC")           
+    input_georef.set_stereographic(opt.proj.lat,opt.proj.lon,opt.proj.scale);
+  if (opt.proj.type == "TRANSVERSE_MERCATOR")     
+    input_georef.set_transverse_mercator(opt.proj.lat,opt.proj.lon,opt.proj.scale);
+  if (opt.proj.type == "UTM") input_georef.set_UTM( abs(opt.proj.utm_zone), opt.proj.utm_zone > 0 );
 
+  // Handle nudge arguments (x and y shifts in projected coordinates)
   if( opt.nudge_x || opt.nudge_y ) {
     Matrix3x3 m = input_georef.transform();
     m(0,2) += opt.nudge_x;
@@ -204,13 +184,20 @@ int handle_options(int argc, char *argv[], Options& opt) {
   po::options_description general_options("Description: Turns georeferenced image(s) into a quadtree with geographical metadata\n\nGeneral Options");
   general_options.add_options()
     ("output-name,o", po::value(&opt.output_file_name), "Specify the base output directory")
-    ("help,h", po::bool_switch(&opt.help), "Display this help message");
+    ("help,h",        po::bool_switch(&opt.help),       "Display this help message");
+
+
+
+const std::string channel_options_str    = "DEFAULT, UINT8, UINT16, INT16, FLOAT";
+const std::string mode_options_str       = "NONE, KML, TMS, UNIVIEW, GMAP, CELESTIA, GIGAPAN";
+const std::string datum_options_str      = "NONE, WGS84, LUNAR, MARS, SPHERE";
+const std::string projection_options_str = "DEFAULT, NONE, SINUSOIDAL, MERCATOR, TRANSVERSE_MERCATOR, ORTHOGRAPHIC, STEREOGRAPHIC, LAMBERT_AZIMUTHAL, LAMBERT_CONFORMAL_CONIC, UTM, PLATE_CARREE";
 
   po::options_description input_options("Input Options");
-  string datum_desc = string("Override input datum [") + DatumOverride::list() + "]";
-  string mode_desc  = string("Specify the output metadata type [") + Mode::list() + "]";
-  string proj_desc  = string("Projection type [") + Projection::list() + "]";
-  string chan_desc  = string("Output channel type [") + Channel::list() + "]";
+  string datum_desc = string("Override input datum ["            ) + datum_options_str      + "]";
+  string mode_desc  = string("Specify the output metadata type [") + mode_options_str       + "]";
+  string proj_desc  = string("Projection type ["                 ) + projection_options_str + "]";
+  string chan_desc  = string("Output channel type ["             ) + channel_options_str    + "]";
 
   input_options.add_options()
     ("force-datum" , po::value(&opt.datum.type)                       , datum_desc.c_str())
@@ -222,9 +209,9 @@ int handle_options(int argc, char *argv[], Options& opt) {
 
   po::options_description output_options("Output Options");
   output_options.add_options()
-    ("mode,m"           , po::value(&opt.mode)->default_value(Mode("kml"))       , mode_desc.c_str())
+    ("mode,m"           , po::value(&opt.mode)->default_value("KML"), mode_desc.c_str())
     ("file-type"        , po::value(&opt.output_file_type)                       , "Output file type.  (Choose \'auto\' to generate jpgs in opaque areas and png images where there is transparency.)")
-    ("channel-type"     , po::value(&opt.channel_type)                           , chan_desc.c_str())
+    ("channel-type"     , po::value(&opt.channel_type)->default_value("DEFAULT"), chan_desc.c_str())
     ("module-name"      , po::value(&opt.module_name)                            , "The module where the output will be placed. Ex: marsds for Uniview,  or Sol/Mars for Celestia")
     ("terrain"          , po::bool_switch(&opt.terrain)                          , "Outputs image files suitable for a Uniview terrain view. Implies output format as PNG, channel type uint16. Uniview only")
     ("jpeg-quality"     , po::value(&opt.jpeg_quality)                           , "JPEG quality factor (0.0 to 1.0)")
@@ -243,7 +230,7 @@ int handle_options(int argc, char *argv[], Options& opt) {
     ("east"       ,  po::value(&opt.east)          , "The easternmost longitude in projection units")
     ("west"       ,  po::value(&opt.west)          , "The westernmost longitude in projection units")
     ("global"     ,  po::bool_switch(&opt.global)  , "Override image size to global (in lonlat)")
-    ("projection" ,  po::value(&opt.proj.type)     , proj_desc.c_str())
+    ("projection" ,  po::value(&opt.proj.type)->default_value("DEFAULT")     , proj_desc.c_str())
     ("utm-zone"   ,  po::value(&opt.proj.utm_zone) , "Set zone for --projection UTM (negative for south)")
     ("proj-lat"   ,  po::value(&opt.proj.lat)      , "The center of projection latitude")
     ("proj-lon"   ,  po::value(&opt.proj.lon)      , "The center of projection longitude")
@@ -265,9 +252,9 @@ int handle_options(int argc, char *argv[], Options& opt) {
 
   std::ostringstream usage;
   usage << "Usage: image2qtree [options] <filename>..." <<endl << endl;
-  usage << general_options << endl;
-  usage << input_options << endl;
-  usage << output_options << endl;
+  usage << general_options    << endl;
+  usage << input_options      << endl;
+  usage << output_options     << endl;
   usage << projection_options << endl;
 
   try {
@@ -276,6 +263,12 @@ int handle_options(int argc, char *argv[], Options& opt) {
     po::variables_map vm;
     po::store( po::command_line_parser( argc, argv ).style(style).options(options).positional(p).run(), vm );
     po::notify( vm );
+    
+    if (!vm.count("input-nodata-value"))
+      opt.nodata_set = false;
+    else
+      opt.nodata_set = true;
+    
     opt.validate();
   } catch (const po::error& e) {
     cerr << usage.str() << endl
@@ -292,21 +285,28 @@ int handle_options(int argc, char *argv[], Options& opt) {
     }
     return false;
   }
+  // Make sure all these string parameters are upper case
+  boost::to_upper(opt.mode);
+  boost::to_upper(opt.datum.type);
+  boost::to_upper(opt.channel_type);
+  boost::to_upper(opt.proj.type);
   return true;
 }
 
+/// This function picks the correct function call to do the work.
 void run(const Options& opt) {
   TerminalProgressCallback tpc( "tools.image2qtree", "");
   const ProgressCallback *progress = &tpc;
 
   // Get the right pixel/channel type, and call the mosaic.
-  ImageFormat fmt = tools::image_format(opt.input_files[0]);
+  ImageFormat fmt = vw::image_format(opt.input_files[0]);
 
-  if(opt.channel_type != Channel::NONE)
-    fmt.channel_type = channel_name_to_enum(opt.channel_type.string());
+  if(opt.channel_type != "DEFAULT")
+    fmt.channel_type = channel_name_to_enum(opt.channel_type);
+  if (fmt.channel_type == VW_CHANNEL_UNKNOWN)
+    vw_throw(LogicErr() << "Unrecognized channel type: " << opt.channel_type);
 
-  // Convert non-alpha channel images into images with one for the
-  // composite.
+  // Convert non-alpha channel images into images with one for the composite.
   switch(fmt.pixel_format) {
   case VW_PIXEL_GRAY:
   case VW_PIXEL_GRAYA:
@@ -318,6 +318,7 @@ void run(const Options& opt) {
   }
 }
 
+/// Main, input parsing and error handling, calls run()
 int main(int argc, char **argv) {
   Options opt;
   if (!handle_options(argc, argv, opt))

@@ -22,6 +22,7 @@
 #include <vw/Image/ImageViewBase.h>
 #include <vw/Image/PixelMask.h>
 #include <vw/Image/PixelTypes.h>
+#include <vw/Image/PixelAccessors.h>
 #include <vw/Stereo/StereoModel.h>
 #include <limits>
 
@@ -31,11 +32,25 @@ namespace vw {
     class CameraModel;
   }
 
-  // Registering point cloud for FileIO
-  template<> struct PixelFormatID<Vector3> { static const PixelFormatEnum value = VW_PIXEL_GENERIC_3_CHANNEL; };
-  template<> struct PixelFormatID<Vector3f> { static const PixelFormatEnum value = VW_PIXEL_GENERIC_3_CHANNEL; };
-
 namespace stereo {
+
+  template <class T>
+  inline typename boost::enable_if<IsScalar<T>,Vector2>::type
+  DispHelper(T const& disparity) {
+    return Vector2((double)disparity, 0);
+  }
+  
+  template <class T>
+  inline typename boost::enable_if_c<IsCompound<T>::value && (CompoundNumChannels<typename UnmaskedPixelType<T>::type>::value == 1),Vector2>::type
+  DispHelper(T const& disparity) {
+    return Vector2((double)disparity, 0);
+  }
+
+  template <class T>
+  inline typename boost::enable_if_c<IsCompound<T>::value && (CompoundNumChannels<typename UnmaskedPixelType<T>::type>::value != 1),Vector2>::type
+  DispHelper(T const& disparity) {
+    return Vector2((double)disparity[0], (double)disparity[1]);
+  }
 
   // Class definition
   template <class DisparityImageT>
@@ -49,28 +64,6 @@ namespace stereo {
     struct NotSingleChannel {
       static const bool value = (1 != CompoundNumChannels<typename UnmaskedPixelType<PixelT>::type>::value);
     };
-
-    template <class T>
-    inline typename boost::enable_if<IsScalar<T>,Vector3>::type
-    StereoModelHelper( StereoModel const& model, Vector2 const& index,
-                       T const& disparity, double& error ) const {
-      return model( index, Vector2( index[0] + disparity, index[1] ), error );
-    }
-
-    template <class T>
-    inline typename boost::enable_if_c<IsCompound<T>::value && (CompoundNumChannels<typename UnmaskedPixelType<T>::type>::value == 1),Vector3>::type
-    StereoModelHelper( StereoModel const& model, Vector2 const& index,
-                       T const& disparity, double& error ) const {
-      return model( index, Vector2( index[0] + disparity, index[1] ), error );
-    }
-
-    template <class T>
-    inline typename boost::enable_if_c<IsCompound<T>::value && (CompoundNumChannels<typename UnmaskedPixelType<T>::type>::value != 1),Vector3>::type
-    StereoModelHelper( StereoModel const& model, Vector2 const& index,
-                       T const& disparity, double& error ) const {
-      return model( index, Vector2( index[0] + disparity[0],
-                                    index[1] + disparity[1] ), error );
-    }
 
   public:
 
@@ -99,8 +92,9 @@ namespace stereo {
     inline result_type operator()( size_t i, size_t j, size_t p=0 ) const {
       double error;
       if ( is_valid(m_disparity_map(i,j,p)) )
-        return StereoModelHelper( m_stereo_model, Vector2(i,j),
-                                  m_disparity_map(i,j,p), error );
+        return m_stereo_model(Vector2(i,j),
+                              Vector2(i,j) + DispHelper(m_disparity_map(i,j,p)),
+                              error);
       // For missing pixels in the disparity map, we return a null 3D position.
       return Vector3();
     }
@@ -172,9 +166,9 @@ namespace stereo {
       m_origin(universe_origin), m_near_radius(near_radius), m_far_radius(far_radius),
       m_state( new UniverseRadiusState() ) {
       VW_ASSERT(m_near_radius >= 0 && m_far_radius >= 0,
-                vw::ArgumentErr() << "UniverseRadius: radii must be >= to zero.");
+                vw::ArgumentErr() << "UniverseRadius: radii must be >= 0.");
       VW_ASSERT(m_near_radius <= m_far_radius,
-                vw::ArgumentErr() << "UniverseRadius: near radius must be <= to far radius.");
+                vw::ArgumentErr() << "UniverseRadius: near radius must be <= far radius.");
       m_state->rejected_points = m_state->total_points = 0;
     }
 

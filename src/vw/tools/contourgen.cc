@@ -49,7 +49,8 @@ BezierContour FitCurve(PointContour &contour, double error);
 vw::ImageView<float> load_dem_from_file(std::string file_in) {
     //    Open the file for reading
     vw::ImageView<float> dem;
-    vw::DiskImageResource *r = vw::DiskImageResource::open( file_in );
+    boost::shared_ptr<vw::DiskImageResource> r( vw::DiskImageResourcePtr(file_in) );
+    
     vw::vw_out(vw::InfoMessage) << "Loading DEM from file" << std::endl;
     vw::vw_out(vw::DebugMessage) << r->rows()
         << "x" << r->cols() << "x" << r->planes()
@@ -61,7 +62,6 @@ vw::ImageView<float> load_dem_from_file(std::string file_in) {
     //    Read the data
     //tpc.set_progress_text("Status (loading image):   " );
     vw::read_image(dem, *r);
-    delete r;
     return dem;
 }
 
@@ -232,8 +232,8 @@ void draw_point_contours(PointContourSet cset,
 void draw_Bezier_contours(BezierContourSet bcset, Cairo::RefPtr<Cairo::Context> cr, float nodataval) {
     vw::vw_out(vw::InfoMessage) << "Writing Bezier contours to output surface\n";
     BezierContourSet::iterator bcset_iter;
-    double line_width, tmp;
-    line_width = 2.0; tmp = 0.0;
+    double line_width;
+    line_width = 2.0;
     //cr->device_to_user_distance(line_width, tmp);
     cr->set_line_width(line_width);
     cr->set_source_rgb(0.0, 0.0, 1.0);

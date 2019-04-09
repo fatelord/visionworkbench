@@ -23,7 +23,7 @@
 if MAKE_MODULE_CORE
 
 include_HEADERS = \
-  Cache.h \
+  Cache.h Cache.tcc \
   CompoundTypes.h \
   Condition.h \
   ConfigParser.h \
@@ -36,13 +36,15 @@ include_HEADERS = \
   ProgressCallback.h \
   RunOnce.h \
   Settings.h \
+  StringUtils.h \
   Stopwatch.h \
   System.h \
   Thread.h \
   ThreadPool.h \
   ThreadQueue.h \
   TypeDeduction.h \
-  VarArray.h
+  VarArray.h \
+  CmdUtils.h
 
 libvwCore_la_SOURCES = \
   Cache.cc \
@@ -52,10 +54,12 @@ libvwCore_la_SOURCES = \
   Log.cc \
   ProgressCallback.cc \
   Settings.cc \
+  StringUtils.cc \
   Stopwatch.cc \
   System.cc \
   Thread.cc \
-  ThreadPool.cc
+  ThreadPool.cc \
+  CmdUtils.cc
 
 libvwCore_la_LIBADD = @MODULE_CORE_LIBS@
 

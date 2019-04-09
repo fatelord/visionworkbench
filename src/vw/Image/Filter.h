@@ -24,6 +24,8 @@
 /// the actual work is done lazily by filtering views, of which
 /// the most important are the convolution views declared in
 /// Convolution.h.
+/// Also contains some morphological functions.
+/// Also contains some per-pixel utility functions.
 #ifndef __VW_IMAGE_FILTER_H__
 #define __VW_IMAGE_FILTER_H__
 
@@ -82,6 +84,20 @@ namespace vw {
     return result;
   }
 
+  /// Make a smoothing kernel for smoothing images before downsampling in an image pyramid.
+  inline std::vector<float> generate_pyramid_smoothing_kernel() {
+    // Build a smoothing kernel to use before downsampling.
+    // Szeliski's book recommended this simple kernel. This
+    // operation is quickly becoming a time sink, we might
+    // possibly want to write an integer optimized version.
+    std::vector<float> kernel(5);
+    kernel[0] = kernel[4] = 1.0/16.0;
+    kernel[1] = kernel[3] = 4.0/16.0;
+    kernel[2] = 6.0/16.0;
+    return kernel;
+  }
+  
+  
   /// \endcond
 
   // General 2D convolution filter functions
@@ -296,7 +312,7 @@ namespace vw {
   /// Applies a Laplacian filter to an image.  This function
   /// computes the Laplacian \f$ \nabla^2\equiv\frac{d^2}{dx^2}+\frac{d^2}{dy^2} \f$
   /// of an image using a \f$ 3\times3 \f$ discrete differentiation
-  /// kernel.  The source image is edge-exetnded using the
+  /// kernel.  The source image is edge-extended using the
   /// given edge extension mode as needed.
   template <class SrcT, class EdgeT>
   ConvolutionView<SrcT, ImageView<typename DefaultKernelT<typename SrcT::pixel_type>::type>, EdgeT>
@@ -353,6 +369,8 @@ namespace vw {
     return mean;
   }
   
+  //===============================================================================
+  //===============================================================================
   // Per-pixel filter functions
 
   /// Filters an image by applying a user-supplied function to each
@@ -375,6 +393,13 @@ namespace vw {
   BinaryPerPixelView<Src1T,Src2T,FuncT>
   inline per_pixel_filter( ImageViewBase<Src1T> const& src1, ImageViewBase<Src2T> const& src2, FuncT const& func ) {
     return BinaryPerPixelView<Src1T,Src2T,FuncT>( src1.impl(), src2.impl(), func );
+  }
+
+  /// Function for the per-pixel-view that also provides the indices at each location.
+  template <class SrcT, class FuncT>
+  UnaryPerPixelIndexView<SrcT,FuncT>
+  inline per_pixel_index_filter( ImageViewBase<SrcT> const& src, FuncT const& func ) {
+    return UnaryPerPixelIndexView<SrcT,FuncT>( src.impl(), func );
   }
 
   // Per-pixel-channel filter functions

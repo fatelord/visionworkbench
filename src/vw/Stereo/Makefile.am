@@ -23,16 +23,16 @@
 if MAKE_MODULE_STEREO
 
 include_HEADERS = AffineMixtureComponent.h Algorithms.h Correlate.h	\
-        Correlate.tcc Correlation.h CorrelationView.h			\
-        CorrelateResearch.h CorrelateResearch.tcc CostFunctions.h	\
+        Correlate.tcc Correlation.h CorrelationView.h	CorrelationView.tcc		\
+        CostFunctions.h	PhaseSubpixelView.h \
         DisparityMap.h EMSubpixelCorrelatorView.h			\
         EMSubpixelCorrelatorView.hpp GammaMixtureComponent.h		\
         GaussianMixtureComponent.h MixtureComponent.h PreFilter.h	\
-        StereoModel.h StereoView.h SubpixelView.h			\
-        UniformMixtureComponent.h
+        StereoModel.h StereoView.h SubpixelView.h ParabolaSubpixelView.h\
+        UniformMixtureComponent.h SGM.h SGMAssist.h
 
 libvwStereo_la_SOURCES = StereoModel.cc Correlate.cc Correlation.cc	\
-        DisparityMap.cc EMSubpixelCorrelatorView.cc CorrelateResearch.cc
+        DisparityMap.cc EMSubpixelCorrelatorView.cc SGM.cc
 
 libvwStereo_la_LIBADD = @MODULE_STEREO_LIBS@
 

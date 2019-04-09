@@ -27,6 +27,9 @@ namespace fs = boost::filesystem;
 namespace vw {
 namespace ip {
 
+//==================================================================================
+// IP descriptor distance metrics
+
   float
   L2NormMetric::operator()( InterestPoint const& ip1, InterestPoint const& ip2,
                             float maxdist ) const {
@@ -34,6 +37,64 @@ namespace ip {
     for (size_t i = 0; i < ip1.descriptor.size(); i++) {
       dist += (ip1.descriptor[i] - ip2.descriptor[i])*(ip1.descriptor[i] - ip2.descriptor[i]);
       if (dist > maxdist) break;  // abort calculation if distance exceeds upper bound
+    }
+    return dist;
+  }
+
+  // This could be simplified a lot if the description length was constant!
+  float HammingMetric::operator()( InterestPoint const& ip1, 
+                                   InterestPoint const& ip2,
+                                   float maxdist ) const {
+    float dist = 0.0;
+    
+    // To use optimized code, first break the descriptor into units of 8, then 4, then 1.
+    const int desc_len = static_cast<int>(ip1.descriptor.size());
+    int d = desc_len;
+    const int uint64_len = 8;
+    const int uint32_len = 4;
+    const int num_64 = d / uint64_len;
+    d -= num_64*uint64_len;
+    const int num_32 = d / uint32_len;
+    
+    // Pack the date into vectors as raw bytes (instead of integer values casted as floats)
+    uint8 packed1[desc_len];
+    uint8 packed2[desc_len];
+    for (int k=0; k<desc_len; ++k) {
+      packed1[k] = static_cast<uint8>(ip1.descriptor[k]);
+      packed2[k] = static_cast<uint8>(ip2.descriptor[k]);
+    }
+    
+    int i=0;  // Never reset this.
+    for (int i64=0; i64<num_64; ++i64) {
+      // Compute the hamming distance between the next 8 bytes
+      uint64 desc1    = *reinterpret_cast<uint64*>(&packed1[i]);
+      uint64 desc2    = *reinterpret_cast<uint64*>(&packed2[i]);
+      size_t dist_int = hamming_distance(desc1, desc2);
+      i += uint64_len;
+
+      // Accumulate the floating point distance
+      dist += static_cast<float>(dist_int);
+      if (dist > maxdist) return dist;  // abort calculation if distance exceeds upper bound
+    }
+
+    for (int i32=0; i32<num_32; ++i32) {
+      // Compute the hamming distance between the next 4 bytes
+      uint32 desc1    = *reinterpret_cast<uint32*>(&packed1[i]);
+      uint32 desc2    = *reinterpret_cast<uint32*>(&packed2[i]);
+      size_t dist_int = hamming_distance(desc1, desc2);
+      i += uint32_len;
+
+      // Accumulate the floating point distance
+      dist += static_cast<float>(dist_int);
+      if (dist > maxdist) return dist;  // abort calculation if distance exceeds upper bound
+    }
+    
+    for (i=i; i<desc_len; ++i) {
+      // Compute the hamming distance between any remaining bytes
+      size_t dist_int = hamming_distance(packed1[i], packed2[i]);
+
+      // Accumulate the floating point distance
+      dist += static_cast<float>(dist_int);
     }
     return dist;
   }
@@ -49,6 +110,9 @@ namespace ip {
     }
     return dist;
   }
+
+//==================================================================================
+// Constraints
 
   bool ScaleOrientationConstraint::operator()( InterestPoint const& baseline_ip,
                                                InterestPoint const& test_ip ) const {
@@ -78,6 +142,9 @@ namespace ip {
     // Otherwise...
     return false;
   }
+
+
+//==================================================================================
 
   void remove_duplicates(std::vector<InterestPoint>& ip1,
                          std::vector<InterestPoint>& ip2) {
@@ -121,14 +188,25 @@ namespace ip {
     return filename;
   }
 
+
   std::string match_filename(std::string const& out_prefix,
                              std::string const& input_file1,
                              std::string const& input_file2){
-    return out_prefix + "-" +
-      strip_path(out_prefix, input_file1) + "__" +
-      strip_path(out_prefix, input_file2) + ".match";
+
+    // filenames longer than this must be chopped, as too long names
+    // cause problems later with boost.
+    int max_len = 40;
+    std::string name1 = strip_path(out_prefix, input_file1).substr(0, max_len);
+    std::string name2 = strip_path(out_prefix, input_file2).substr(0, max_len);
+
+    return out_prefix + "-" + name1 + "__" + name2 + ".match";
   }
 
+  std::string ip_filename(std::string const& out_prefix,
+                          std::string const& input_file) {
+    return out_prefix + "-" + strip_path(out_prefix, input_file) + ".vwip";
+  }
+  
   void ip_filenames(std::string const& out_prefix,
                     std::string const& input_file1,
                     std::string const& input_file2,

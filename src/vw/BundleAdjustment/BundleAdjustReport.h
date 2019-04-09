@@ -32,9 +32,10 @@
 
 // Vision Workbench
 #include <vw/Core/Log.h>
+#include <vw/Math/Statistics.h>
 #include <vw/Camera/CameraModel.h>
 #include <vw/Stereo/StereoModel.h>
-#include <vw/Cartography/SimplePointImageManipulation.h>
+#include <vw/Cartography/PointImageManipulation.h>
 #include <vw/FileIO/KML.h>
 #include <vw/BundleAdjustment/ControlNetwork.h>
 
@@ -89,8 +90,11 @@ namespace ba {
   bool vector_sorting( Vector3 i, Vector3 j);
 
   void write_kml_styles( KMLFile& kml );
+  
+  /// Writes an INACCURATE kml listing of the GCPs
   void write_gcps_kml( KMLFile& kml,
                        ControlNetwork const& cnet );
+  /// Inaccurate!
   void write_3d_est_kml( KMLFile& kml,
                          ControlNetwork const& cnet,
                          std::vector<double>& image_errors );
@@ -192,9 +196,9 @@ namespace ba {
         m_human_both << "\tInitial Lambda:       " << m_adjuster.lambda()
                      << std::endl;
         m_human_report << "\tA Inverse Covariance: "
-                       << m_model.A_inverse_covariance(0) << std::endl;
+                       << m_model.cam_inverse_covariance(0) << std::endl;
         m_human_report << "\tB Inverse Covariance: "
-                       << m_model.B_inverse_covariance(0) << std::endl;
+                       << m_model.point_inverse_covariance(0) << std::endl;
         if (!m_adjuster.camera_constraint())
           m_human_report << "\tCamera Constraint shut off!\n";
         if (!m_adjuster.gcp_constraint())
@@ -262,10 +266,14 @@ namespace ba {
         math::CDFAccumulator<double> image_cdf;
         BOOST_FOREACH( ControlPoint const& cp, *network ) {
           BOOST_FOREACH( ControlMeasure const& cm, cp ) {
-            image_cdf(m_model.image_compare(cm.position(),
-                                            m_model(cp_index,cm.image_id(),
-                                                    m_model.A_parameters(cm.image_id()),
-                                                    m_model.B_parameters(cp_index))));
+            try{
+              image_cdf(m_model.image_compare(cm.position(),
+                                              m_model.cam_pixel(cp_index,cm.image_id(),
+                                                      m_model.cam_params(cm.image_id()),
+                                                      m_model.point_params(cp_index))));
+            } catch(const camera::PointToPixelErr& e) {
+              // Missed pixels are not included in the reporting statistics!
+            }
           }
           cp_index++;
         }
@@ -276,8 +284,8 @@ namespace ba {
       { // Grabbing Camera Information
         math::CDFAccumulator<double> position_cdf, pose_cdf;
         for ( size_t j = 0; j < m_model.num_cameras(); j++ ) {
-          position_cdf( m_model.position_compare( m_model.A_parameters(j), m_model.A_target(j) ) );
-          pose_cdf( m_model.pose_compare( m_model.A_parameters(j), m_model.A_target(j) ) );
+          position_cdf( m_model.position_compare( m_model.cam_params(j), m_model.cam_target(j) ) );
+          pose_cdf( m_model.pose_compare( m_model.cam_params(j), m_model.cam_target(j) ) );
         }
         write_statistics( position_cdf, "C Pos",
                           m_model.camera_position_unit());
@@ -291,8 +299,8 @@ namespace ba {
         for ( size_t i = 0; i < m_model.num_points(); i++ ) {
           if ( (*network)[i].type() == ControlPoint::GroundControlPoint ) {
             count++;
-            gcp_cdf( m_model.gcp_compare( m_model.B_parameters(i),
-                                          m_model.B_target(i) ) );
+            gcp_cdf( m_model.gcp_compare( m_model.point_params(i),
+                                          m_model.point_target(i) ) );
           }
         }
         if ( count > 0 )

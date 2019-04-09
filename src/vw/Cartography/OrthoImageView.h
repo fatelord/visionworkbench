@@ -19,17 +19,19 @@
 #ifndef __VW_CARTOGRAPHY_ORTHOIMAGEVIEW_H__
 #define __VW_CARTOGRAPHY_ORTHOIMAGEVIEW_H__
 
+#include <vw/Math/BresenhamLine.h>
 #include <vw/Image/ImageViewBase.h>
 #include <vw/Image/EdgeExtension.h>
 #include <vw/Image/Interpolation.h>
 #include <vw/Cartography/GeoReference.h>
-#include <vw/Cartography/detail/BresenhamLine.h>
 #include <vw/Camera/CameraModel.h>
 
 #include <boost/shared_ptr.hpp>
 
 
 /// \file OrthoImageView.h Image view that projects a camera image onto a given digital elevation model.
+
+// TODO: We don't use this class for anything, why not??
 
 namespace vw {
 namespace cartography {
@@ -45,16 +47,16 @@ namespace cartography {
 
     typedef typename boost::mpl::if_<IsFloatingPointIndexable<TerrainImageT>, double, int32>::type offset_type;
 
-    TerrainImageT m_terrain;
-    GeoReference m_georef;
+    TerrainImageT        m_terrain;
+    GeoReference         m_georef;
     camera::CameraModel* m_camera_model; // There is a big assumption
                                          // here that the user's
                                          // camera model is thread
                                          // safe.
     InterpolationView<EdgeExtensionView<CameraImageT, EdgeT>, InterpT> m_camera_image;
     CameraImageT m_camera_image_ref;
-    InterpT m_interp_func;
-    EdgeT m_edge_func;
+    InterpT      m_interp_func;
+    EdgeT        m_edge_func;
 
     // Provide safe interaction with DEMs that are scalar or compound
     template <class PixelT>
@@ -74,7 +76,7 @@ namespace cartography {
       return m_camera_model->point_to_pixel( m_georef.datum().geodetic_to_cartesian( Vector3( lon_lat.x(), lon_lat.y(), height ) ) );
     }
 
-    inline void apply_bresen( BresenhamLine line, double min, double max, BBox2i& camera_bbox ) const {
+    inline void apply_bresen( math::BresenhamLine line, double min, double max, BBox2i& camera_bbox ) const {
       while ( line.is_good() ) {
         Vector2i pt( *line );
         try { camera_bbox.grow( find_camera_coordinates( pt.x(), pt.y(), min ) ); }
@@ -98,8 +100,8 @@ namespace cartography {
       m_camera_image_ref(camera_image), m_interp_func(interp_func),
       m_edge_func(edge_func) {}
 
-    inline int32 cols() const { return m_terrain.cols(); }
-    inline int32 rows() const { return m_terrain.rows(); }
+    inline int32 cols  () const { return m_terrain.cols();        }
+    inline int32 rows  () const { return m_terrain.rows();        }
     inline int32 planes() const { return m_camera_image.planes(); }
 
     inline pixel_accessor origin() const { return pixel_accessor(*this); }
@@ -187,7 +189,7 @@ namespace cartography {
       typename TerrainImageT::prerasterize_type terrain_preraster = m_terrain.prerasterize(bbox);
 
       double terrain_min = std::numeric_limits<double>::max(),
-        terrain_max = std::numeric_limits<double>::min();
+             terrain_max = std::numeric_limits<double>::min();
 
       // Determine min max
       for ( int32 j = bbox.min().y(); j < bbox.max().y(); j++ ) {
@@ -204,17 +206,17 @@ namespace cartography {
       // be using. Unfortunately this is no linear. We need to project
       // all the pixels really. For speed I'm only processing an X
       BBox2i camera_bbox;
-      apply_bresen( BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.max().x(), bbox.min().y() ),
+      apply_bresen( math::BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.max().x(), bbox.min().y() ),
                     terrain_min, terrain_max, camera_bbox );
-      apply_bresen( BresenhamLine( bbox.min().x(), bbox.max().y(), bbox.max().x(), bbox.max().y() ),
+      apply_bresen( math::BresenhamLine( bbox.min().x(), bbox.max().y(), bbox.max().x(), bbox.max().y() ),
                     terrain_min, terrain_max, camera_bbox );
-      apply_bresen( BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.min().x(), bbox.max().y() ),
+      apply_bresen( math::BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.min().x(), bbox.max().y() ),
                     terrain_min, terrain_max, camera_bbox );
-      apply_bresen( BresenhamLine( bbox.max().x(), bbox.min().y(), bbox.max().x(), bbox.max().y() ),
+      apply_bresen( math::BresenhamLine( bbox.max().x(), bbox.min().y(), bbox.max().x(), bbox.max().y() ),
                     terrain_min, terrain_max, camera_bbox );
-      apply_bresen( BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.max().x(), bbox.max().y() ),
+      apply_bresen( math::BresenhamLine( bbox.min().x(), bbox.min().y(), bbox.max().x(), bbox.max().y() ),
                     terrain_min, terrain_max, camera_bbox );
-      apply_bresen( BresenhamLine( bbox.min().x(), bbox.max().y(), bbox.max().x(), bbox.min().y() ),
+      apply_bresen( math::BresenhamLine( bbox.min().x(), bbox.max().y(), bbox.max().x(), bbox.min().y() ),
                     terrain_min, terrain_max, camera_bbox );
       camera_bbox.max() += Vector2i(1,1);        // Because grow is
                                                  // inclusive and we

@@ -39,6 +39,8 @@
 #include <vw/Core/Exception.h>
 #include <vw/config.h>
 
+#include <queue>
+
 // The math.h header in FreeBSD (and possibly other platforms) does not
 // include routines for manipulating long doubles.  We disable long
 // double VW math routines here for certain platforms.
@@ -49,9 +51,9 @@
 namespace vw {
   namespace math {
 
-    template <class T> struct StdMathType { typedef double type; };
-    template <> struct StdMathType<float> { typedef float type; };
-    template <> struct StdMathType<long double> { typedef long double type; };
+    template <class T> struct StdMathType              { typedef double type; };
+    template <>        struct StdMathType<float      > { typedef float type; };
+    template <>        struct StdMathType<long double> { typedef long double type; };
     template <class T1, class T2> struct StdMathType2 {
       typedef typename StdMathType<typename PromoteType<T1,T2>::type>::type type;
     };
@@ -118,6 +120,7 @@ namespace vw {
 #define __VW_MATH_BINARY_LONG_DOUBLE_IMPL(func)
 #endif
 
+// Macros to easily create functors with a certain interface
 #define __VW_UNARY_MATH_FUNCTOR(name,func)                              \
     struct Arg##name##Functor                                           \
       : UnaryReturnBinaryTemplateBind1st<ArgUnaryFunctorType,Arg##name##Functor> { \
@@ -132,7 +135,7 @@ namespace vw {
         __VW_MATH_UNARY_LONG_DOUBLE_IMPL(func)                          \
           };                                                            \
     using ::func;
-
+// END __VW_UNARY_MATH_FUNCTOR
 #define __VW_BINARY_MATH_FUNCTOR(name,func)                             \
     struct ArgArg##name##Functor                                        \
       : BinaryReturnTernaryTemplateBind1st<BinaryFunctorType,ArgArg##name##Functor> { \
@@ -169,6 +172,7 @@ namespace vw {
   }                                                                     \
   };                                                                    \
     using ::func;
+// END __VW_BINARY_MATH_FUNCTOR
 
     __VW_UNARY_MATH_FUNCTOR( Fabs, fabs )
     __VW_UNARY_MATH_FUNCTOR( Acos, acos )
@@ -218,6 +222,7 @@ namespace vw {
     __VW_BINARY_MATH_FUNCTOR( Fdim, fdim )
 #endif
 
+// Clean up the macros we are finished using
 #undef __VW_UNARY_MATH_FUNCTOR
 #undef __VW_BINARY_MATH_FUNCTOR
 
@@ -346,7 +351,7 @@ namespace vw {
     };
 
 
-    // Computes minimum and maximum values
+    /// Computes minimum and maximum values
     template <class ValT>
     class MinMaxAccumulator : public ReturnFixedType<void> {
       ValT m_minval, m_maxval;
@@ -383,6 +388,14 @@ namespace vw {
       }
     };
 
+    // Note: This function modifies the input!
+    template <class T>
+    T destructive_median(std::vector<T> & vec){
+      int len = vec.size();
+      VW_ASSERT(len, ArgumentErr() << "median: no valid samples.");
+      std::sort(vec.begin(), vec.end());
+      return len%2 ? vec[len/2] : (vec[len/2 - 1] + vec[len/2]) / 2;
+    }
 
     // Computes the median of the values to which it is applied.
     template <class ValT>
@@ -395,15 +408,63 @@ namespace vw {
         m_values.push_back( value );
       }
 
-      ValT const& value() {
-        VW_ASSERT(m_values.size(), ArgumentErr() << "MedianAccumulator: no valid samples");
-        sort(m_values.begin(), m_values.end());
-        return m_values[m_values.size()/2];
+      // This is to check if there are any values
+      size_t size() {
+        return m_values.size();
+      }
+      
+      ValT value() {
+        return destructive_median(m_values);
       }
     };
 
+    // Compute the normalized median absolute deviation:
+    // nmad = 1.4826 * median(abs(X - median(X)))  
+    // Note: This function modifies the input!
+    template <class T>
+    T destructive_nmad(std::vector<T> & vec){
+      int len = vec.size();
+      VW_ASSERT(len, ArgumentErr() << "nmad: no valid samples.");
+      
+      // Find the median. This sorts the vector, but that is not a problem.
+      T median = destructive_median(vec);
+      
+      for (size_t it = 0; it < vec.size(); it++)
+        vec[it] = std::abs(vec[it] - median);
+      
+      median = destructive_median(vec);
+      
+      median *= 1.4826;
+      
+      return median;
+    }
+  
+    // Compute the percentile using
+    // https://en.wikipedia.org/wiki/Percentile#The_nearest-rank_method
+    // Note: This function modifies the input!
+    template <class T>
+    T destructive_percentile(std::vector<T> & vec, double percentile){
+      
+      int len = vec.size();
+      VW_ASSERT(len > 0, ArgumentErr() << "percentile: no valid samples.");
+      VW_ASSERT(percentile >= 0 && percentile <= 100.0,
+                ArgumentErr() << "Percentile must be between 0 and 100.");
 
-    // Computes the mean of the values to which it is applied.
+      // Sorting is vital
+      std::sort(vec.begin(), vec.end());
+
+      int index = ceil((percentile/100.0) * double(len));
+
+      // Account for the fact that in C++ indices start from 0 
+      index--;
+
+      if (index < 0) index = 0;
+      if (index >= len) index = len-1;
+        
+      return vec[index];
+    }
+
+    /// Computes the mean of the values to which it is applied.
     template <class ValT>
     class MeanAccumulator : public ReturnFixedType<void> {
       typedef typename CompoundChannelCast<ValT,double>::type accum_type;
@@ -426,7 +487,8 @@ namespace vw {
     };
 
 
-    // Computes the standard deviation of the values to which it is applied.
+    /// Computes the standard deviation of the values to which it is applied.
+    /// - This implementation normalizes by num_samples, not num_samples - 1.
     template <class ValT>
     class StdDevAccumulator : public ReturnFixedType<void> {
       typedef typename CompoundChannelCast<ValT,double>::type accum_type;
@@ -443,330 +505,83 @@ namespace vw {
         num_samples += 1.0;
       }
 
+      /// Return the standard deviation
       value_type value() const {
         VW_ASSERT(num_samples, ArgumentErr() << "StdDevAccumulator(): no valid samples.");
         return sqrt(mom2_accum/num_samples - (mom1_accum/num_samples)*(mom1_accum/num_samples));
       }
+      /// Return the mean
+      value_type mean() const {
+        VW_ASSERT(num_samples, ArgumentErr() << "StdDevAccumulator(): no valid samples.");
+        return mom1_accum / num_samples;
+      }
     };
 
 
-    // CDF (Cumulative Distribution Function) Accumulator
-    // Actually it's an approximation. It allows for a more memory efficient
-    // calculation of any quantile. Probably most importantly the median.
-    //
-    // Taken from Numerical Recipes (3rd E) pg 435
-    template <class ValT>
-    class CDFAccumulator : public ReturnFixedType<void> {
-      size_t m_num_quantiles, m_buffer_idx;
-      size_t m_num_samples; // nq, nd, nt
-      std::vector<double> m_cdf, m_sample_buf, m_quantile;
-      double m_q0, m_qm;  // quantile min and max;
-
-      // Trapezoidal Rule functor for numeric integration
-      template <class InputIterator1, class InputIterator2>
-      double trapezoidal_rule( InputIterator1 first1, InputIterator1 last1,
-                               InputIterator2 first2 ) {
-        // We will never acess last1 .. remember that
-        double sum = 0.0;
-        while ( first1 + 1 != last1 ) {
-          sum += 0.5 * ( *(first1+1) - *first1 ) * ( *first2 + *(first2+1) );
-          first1++;
-          first2++;
-        }
-        return sum;
-      }
-
-      // PDF differentiation. Requires an output vector that is qual
-      // in length to the CDF but doesn't touch index 0 or the last
-      // element.
-      void pdf_differentiation( std::vector<double> const& quantile,
-                                std::vector<double> const& cdf,
-                                std::vector<double> & output_pdf ) {
-        output_pdf[0] = 0;
-        output_pdf[output_pdf.size()-1] = 0;
-
-        for ( size_t i = 1; i < quantile.size() - 1; i++ ) {
-          // Trying to get a centered derivative
-          output_pdf[i] = 0;
-          double quantile_diff = quantile[i] - quantile[i-1];
-          if ( fabs(quantile_diff) > 1e-3 )
-            output_pdf[i] = (cdf[i] - cdf[i-1])/quantile_diff;
-          quantile_diff = quantile[i+1]-quantile[i];
-          if ( fabs(quantile_diff) > 1e-3 )
-            output_pdf[i] += (cdf[i+1]-cdf[i])/quantile_diff;
-          output_pdf[i] /= 2;
-        }
-      }
-
-      void correct_pdf_integral_to_1( std::vector<double> const& quantile,
-                                      std::vector<double> & pdf,
-                                      double additional_scalar ) {
-        double pdf_error =
-          trapezoidal_rule( quantile.begin(), quantile.end(),
-                            pdf.begin() );
-        if ( pdf_error > 1.0 ) {
-          double correction = (1.0 / pdf_error) * additional_scalar;
-          for ( size_t i = 0; i < pdf.size(); i++ )
-            pdf[i] *= correction;
-        } else {
-          vw_throw( MathErr() << "CDFMathAccumuator: This odd error happens?!" );
-        }
-      }
-
+    /// Compute the standard deviation of values in a fixed size list.
+    /// - When a new value is added, the oldest value is removed from the statistics.
+    /// - This implementation normalizes by num_samples, not num_samples - 1.
+    class StdDevSlidingFunctor {
     public:
-      CDFAccumulator( size_t buffersize = 1000, size_t quantiles = 251) {
-        this->resize( buffersize, quantiles );
+      /// Constructor set with the sliding window size.
+      StdDevSlidingFunctor(const size_t max_size)
+        : m_max_size(max_size), m_mean(0), m_squared(0) {}
+
+      /// Implement push with the standard functor interface
+      void operator()(double new_val) {
+        push(new_val);
       }
 
-      // Allow user to change post constructor (see ChannelAccumulator)
-      void resize( size_t buffersize, size_t quantiles ) {
-        VW_ASSERT(quantiles > 0, LogicErr() << "Cannot have 0 quantiles");
-        m_buffer_idx = m_num_samples = 0;
-        m_sample_buf.resize( buffersize );
+      /// Add a new value and eject the oldest value.
+      void push(double new_val) {
 
-        m_q0 =  std::numeric_limits<double>::max();
-        m_qm = -std::numeric_limits<double>::max();
+        // If we grew larger than the size limit remove the oldest value
+        if (m_values.size() >= m_max_size)
+          pop();
 
-        m_num_quantiles = quantiles;
-        if ( !(quantiles%2) )
-          m_num_quantiles++;
-        m_quantile.resize(m_num_quantiles);
-        m_cdf.resize(m_num_quantiles);
+        // Now incorporate the newest value
+        m_values.push(new_val); // Record the new value
+        double count = static_cast<double>(m_values.size());
 
-        // Setting a generic cdf to start things off, where 80% of the
-        // distribution is in the middle third.
-        size_t third = m_num_quantiles/3;
-        size_t third2 = third*2;
-        double slope = 10.0 / double(third);
-        double first_tertile_gain = 1.0 - slope;
+        // Update the statistics to add in the new value
+        double delta = new_val - m_mean;
+        m_mean += delta/count;
 
-        // Filling middle
-        for ( size_t j = third; j <= third2; j++ )
-          m_cdf[j] = 0.8*(double(j-third)/double(third2-third))+0.1;
-        // Filling first tertile
-        for ( ssize_t j = third-1; j >= 0; j-- )
-          m_cdf[j] = first_tertile_gain*m_cdf[j+1];
-        // Filling third tertile
-        for ( size_t j = third2+1; j < m_num_quantiles; j++ )
-          m_cdf[j] = 1.0 - first_tertile_gain*(1.0-m_cdf[j-1]);
+        double delta2 = new_val - m_mean;
+        m_squared += delta*delta2;
       }
 
-      // Merge in Bundles
-      void update() {
-        // Early exit if an update already happened
-        if (!m_buffer_idx)
+      /// Remove the oldest value
+      void pop() {
+        if (m_values.empty()) // Handle empty case
           return;
 
-        size_t jd=0, jq=1;
-        double target, told=0, tnew=0, qold, qnew;
-        std::vector<double> m_new_quantile(m_num_quantiles);
-        std::sort( m_sample_buf.begin(),
-                   m_sample_buf.begin()+m_buffer_idx ); // For partial updates
-        // Setting to global min and max;
-        qold = qnew = m_quantile[0] = m_new_quantile[0] = m_q0;
-        m_quantile.back() = m_new_quantile.back() = m_qm;
-        // .. then setting comparable probabilities
-        m_cdf[0] = std::min(0.5/(m_buffer_idx+m_num_samples),
-                            0.5*m_cdf[1]);
-        m_cdf.back() = std::max(1-0.5/(m_buffer_idx+m_num_samples),
-                                0.5*(1+m_cdf[m_num_quantiles-2]));
-        // Looping over target probability values for interpolation
-        for ( size_t iq = 1; iq < m_num_quantiles-1; iq++ ) {
-          target = (m_num_samples+m_buffer_idx)*m_cdf[iq];
-          if ( tnew < target ) {
-            while (1) {
-              // Locating a succession of abscissa-ordinate pairs
-              // (qnew,tnew) that are the discontinuities of value or
-              // slope, breaking to perform an interpolation as we cross
-              // each target.
-              if ( jq < m_num_quantiles &&
-                   ( jd >= m_buffer_idx ||
-                     m_quantile[jq] < m_sample_buf[jd] ) ) {
-                // Found slope discontinuity from old CDF.
-                qnew = m_quantile[jq];
-                tnew = jd + m_num_samples*m_cdf[jq++];
-                if ( tnew >= target ) break;
-              } else {
-                // Found value discontinuity from batch data CDF.
-                qnew = m_sample_buf[jd];
-                tnew = told;
-                if ( m_quantile[jq] > m_quantile[jq-1] )
-                  tnew += m_num_samples*(m_cdf[jq]-m_cdf[jq-1])*
-                    (qnew-qold)/(m_quantile[jq]-m_quantile[jq-1]);
-                jd++;
-                if ( tnew >= target ) break;
-                told = tnew++;
-                qold = qnew;
-                if ( tnew >= target ) break;
-              }
-              told = tnew;
-              qold = qnew;
-            }
-          }
-          // Performing new interpolation
-          if ( tnew == told )
-            m_new_quantile[iq] = 0.5*(qold+qnew);
-          else
-            m_new_quantile[iq] = qold + (qnew-qold)*(target-told)/(tnew-told);
-          told = tnew;
-          qold = qnew;
-        }
-        // Reset'n
-        m_quantile = m_new_quantile;
-        m_num_samples += m_buffer_idx;
-        m_buffer_idx = 0;
+        double old_val = m_values.front();
+        double count   = static_cast<double>(m_values.size());
+        m_values.pop();
+
+        // Update the statistics to account for removing the old value
+        double shrunk_count = count - 1.0;
+        double new_mean = (count*m_mean - old_val)/shrunk_count;
+
+        m_squared -= (old_val - m_mean) * (old_val - new_mean);
+        m_mean = new_mean;
+      };
+
+      /// Compute the standard deviation of all current values.
+      double get_std_dev() {
+        double count = static_cast<double>(m_values.size());
+        if (count < 2.0)
+          return 0;
+        return sqrt(m_squared/count);
       }
 
-      // User update function. (Bundles Data)
-      void operator()( ValT const& arg ) {
-        // Assimilate, We are the Borg, your data is my data!
-        m_sample_buf[m_buffer_idx++] = arg;
-        if ( arg < m_q0 ) { m_q0 = arg; } // stretch cdf?
-        if ( arg > m_qm ) { m_qm = arg; }
-        if ( m_buffer_idx == m_sample_buf.size() ) update(); // merge cdf?
-      }
-
-      // Function to merge to CDFs
-      void operator()( CDFAccumulator<ValT>& other ) {
-        update();
-        other.update();
-
-        // Work out the new range of m_q0 and m_qm
-        if ( m_qm < other.m_qm ) m_qm = other.m_qm;
-        if ( m_q0 > other.m_q0 ) m_q0 = other.m_q0;
-
-        // Generate PDF of both distribution functions by differentiating
-        std::vector<double> pdf1(m_num_quantiles), pdf2(other.m_num_quantiles);
-        pdf_differentiation( m_quantile, m_cdf, pdf1 );
-        pdf_differentiation( other.m_quantile, other.m_cdf, pdf2 );
-
-        // Resample both PDFs to higher number of quantiles that
-        // intersects both ranges.
-
-        // Defining quantile range
-        std::vector<double> new_quantile( m_quantile.size() );
-        new_quantile[0] = m_q0;
-        new_quantile.back() = m_qm;
-        double distance = m_qm - m_q0;
-        std::transform( m_cdf.begin() + 1, m_cdf.end() - 1, new_quantile.begin() + 1,
-                        std::bind1st( std::multiplies<double>(), distance ) );
-        std::transform( new_quantile.begin() + 1, new_quantile.end() - 1,
-                        new_quantile.begin() + 1,
-                        std::bind1st( std::plus<double>(), m_q0 ) );
-
-        // Resampling PDFs to our new quantile range so that we may
-        // later add these 2 PDFs together.
-        std::vector<double> pdf1_resample( m_quantile.size(), 0.0 ), pdf2_resample( m_quantile.size(), 0.0 );
-        {
-          size_t q1_i0 = 0, q2_i0 = 0;
-          for ( size_t i = 0; i < m_quantile.size(); i++ ) {
-
-            // Finding indexes that are just past our target quantile
-            while ( q1_i0 < m_quantile.size() &&
-                    m_quantile[q1_i0] < new_quantile[i] ) {
-              q1_i0++;
-            }
-            while ( q2_i0 < other.m_quantile.size() &&
-                    other.m_quantile[q2_i0] < new_quantile[i] ) {
-              q2_i0++;
-            }
-
-            if ( q1_i0 != 0 && q1_i0 < m_quantile.size() ) {
-              // The index represents represents
-              // the next greatest matching quantile.
-              pdf1_resample[i] = pdf1[q1_i0-1] + (pdf1[q1_i0] - pdf1[q1_i0-1]) * ( new_quantile[i] - m_quantile[q1_i0-1] ) / (m_quantile[q1_i0] - m_quantile[q1_i0-1]);
-            }
-            if ( q2_i0 != 0 && q2_i0 < other.m_quantile.size() ) {
-              // The index represents represents
-              // the next greatest matching quantile.
-              pdf2_resample[i] = pdf2[q2_i0-1] + (pdf2[q2_i0] - pdf2[q2_i0-1]) * ( new_quantile[i] - other.m_quantile[q2_i0-1] ) / (other.m_quantile[q2_i0] - other.m_quantile[q2_i0-1]);
-            }
-          }
-        }
-
-        // Correct the problem where the resampled PDF doesn't actually sum to 1
-        correct_pdf_integral_to_1( new_quantile, pdf1_resample,
-                                   double(m_num_samples) / double(m_num_samples+other.m_num_samples) );
-        correct_pdf_integral_to_1( new_quantile, pdf2_resample,
-                                   double(other.m_num_samples) / double(m_num_samples+other.m_num_samples) );
-
-        std::transform( pdf1_resample.begin(), pdf1_resample.end(),
-                        pdf2_resample.begin(), pdf1_resample.begin(),
-                        std::plus<double>() );
-
-
-        // Integrate out a CDF
-        std::vector<double> new_cdf( new_quantile.size() );
-        new_cdf[0] = 0.0;
-        for ( size_t i = 0; i < new_quantile.size() - 1; i++ ) {
-          new_cdf[i+1] = new_cdf[i] + trapezoidal_rule( new_quantile.begin() + i,
-                                                        new_quantile.begin() + i + 2,
-                                                        pdf1_resample.begin() + i );
-        }
-
-        // Resample CDF to match our current rig
-        m_quantile[0] = m_q0;
-        m_quantile.back() = m_qm;
-        {
-          size_t cdf_index = 0;
-          for ( size_t i = 1; i < m_quantile.size() - 1; i++ ) {
-            while ( cdf_index < new_cdf.size() && new_cdf[cdf_index] < m_cdf[i] ) {
-              cdf_index++;
-            }
-            if ( cdf_index == 0 ) {
-              m_quantile[i] = new_quantile[cdf_index];
-            } else if ( cdf_index == new_cdf.size() ) {
-              m_quantile[i] = new_quantile.back();
-            } else {
-              m_quantile[i] = new_quantile[cdf_index-1] + (m_cdf[i] - new_cdf[cdf_index-1]) * (new_quantile[cdf_index]-new_quantile[cdf_index-1]) / ( new_cdf[cdf_index] - new_cdf[cdf_index-1]);
-            }
-          }
-        }
-        m_num_samples += other.m_num_samples;
-      }
-
-      // Extract a percentile
-      ValT quantile( double const& arg ) const {
-        double q;
-
-        // if ( m_buffer_idx > 0 ) update();
-        size_t jl=0,jh=m_num_quantiles-1,j;
-        while ( jh - jl > 1 ) {
-          j = (jh+jl)>>1;
-          if ( arg > m_cdf[j] ) jl=j;
-          else jh=j;
-        }
-        j = jl;
-        q = m_quantile[j]+(m_quantile[j+1]-m_quantile[j])*(arg-m_cdf[j])/(m_cdf[j+1]-m_cdf[j]);
-
-        // Keeping estimate in CDF
-        return std::max(m_quantile[0],std::min(m_quantile.back(),q));
-      }
-
-      // Predefine functions
-      ValT median() const { return quantile(0.5); }
-      ValT first_quartile() const { return quantile(0.25); }
-      ValT third_quartile() const { return quantile(0.75); }
-      ValT approximate_mean( float const& stepping = 0.1 ) const {
-        ValT mean = 0;
-        size_t count = 0;
-        for ( float i = stepping; i < 1+stepping; i+=stepping ) {
-          count++;
-          mean += ( quantile(i) + quantile(i-stepping) ) / 2.0;
-        }
-        return mean / ValT(count);
-      }
-      ValT approximate_stddev( float const& stepping = 0.1 ) const {
-        ValT mean = approximate_mean(stepping);
-        ValT stddev = 0;
-        size_t count = 0;
-        for ( float i = stepping; i < 1+stepping; i+=stepping ) {
-          count++;
-          stddev += pow((quantile(i) + quantile(i-stepping))/2-mean,2);
-        }
-        return sqrt(stddev/ValT(count));
-      }
-    };
+    private:
+        size_t m_max_size; ///< Max number of values to store.
+        std::queue<double> m_values; ///< Store current values
+        double m_mean;    ///< Store the mean
+        double m_squared; ///< Store sum of differences squared
+    }; // End class StdDevSlidingFunctor
 
   } // namespace math
 
@@ -776,6 +591,7 @@ namespace vw {
   using math::MedianAccumulator;
   using math::MeanAccumulator;
   using math::StdDevAccumulator;
+  using math::StdDevSlidingFunctor;
 
 } // namespace vw
 

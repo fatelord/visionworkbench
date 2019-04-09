@@ -24,14 +24,22 @@ if MAKE_MODULE_IMAGE
 
 include_HEADERS = \
   AlgorithmFunctions.h \
+  AlgorithmFunctions.tcc \
   Algorithms.h \
+  Algorithms.tcc \
+  Algorithms2.h \
+  AntiAliasing.h \
+  BlobIndex.h \
   BlockProcessor.h \
   BlockRasterize.h \
+  CensusTransform.h \
   Convolution.h \
-  EdgeExtend.h \
   EdgeExtension.h \
+  EdgeExtension.tcc \
+  ErodeView.h \
   Filter.h \
   Filter.tcc \
+  Fourier.h \
   ImageIO.h \
   ImageMath.h \
   ImageResource.h \
@@ -41,12 +49,15 @@ include_HEADERS = \
   ImageViewBase.h \
   ImageView.h \
   ImageViewRef.h \
+  InpaintView.h \
   Interpolation.h \
   Manipulation.h \
+  Manipulation.tcc \
   MaskViews.h \
-  Palette.h \
+  MaskViews.tcc \
   PerPixelAccessorViews.h \
   PerPixelViews.h \
+  PerPixelViews.tcc \
   PixelAccessors.h \
   PixelIterator.h \
   PixelMask.h \
@@ -54,16 +65,21 @@ include_HEADERS = \
   PixelTypeInfo.h \
   PixelTypes.h \
   SparseImageCheck.h \
+  SparseView.h \
   Statistics.h \
+  Statistics.tcc \
   Transform.h \
   UtilityViews.h \
-  ViewImageResource.h
+  ViewImageResource.h \
+  WindowAlgorithms.h
 
 libvwImage_la_SOURCES = \
+  BlobIndex.cc \
   Filter.cc \
   ImageResource.cc \
   ImageResourceStream.cc \
   Interpolation.cc \
+  Transform.cc \
   PixelTypeInfo.cc
 
 libvwImage_la_LIBADD = @MODULE_IMAGE_LIBS@

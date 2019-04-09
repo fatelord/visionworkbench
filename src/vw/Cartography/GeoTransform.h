@@ -22,70 +22,128 @@
 #include <sstream>
 #include <string>
 
+#include <vw/Core/Thread.h>
 #include <vw/Math/Vector.h>
 #include <vw/Image/Transform.h>
 #include <vw/Cartography/GeoReference.h>
 
-/// \file GeoTransform.h Tools for converting point and images between geographic datums.
+/// \file GeoTransform.h Tools for converting points and images between geographic datums.
 
 namespace vw {
 namespace cartography {
 
+
+  /// A structure to allow the fast and accurate conversion of coordinates between
+  /// two GeoReference objects.
+  /// - Use of this class is the ONLY safe method to convert coordinates between two
+  ///   GeoReference objects that fully handles all variables.
+  /// - Be very careful using this class to convert between datums!  Not all datums will correctly convert.
+  ///   To be safe verify that your datums convert properly or use a dedicated tool such as 
+  ///   ASP's datum_convert to do the conversions.
   class GeoTransform : public TransformHelper<GeoTransform,ContinuousFunction,ContinuousFunction> {
 
-    GeoReference m_src_georef;
-    GeoReference m_dst_georef;
-    ProjContext m_src_proj, m_dst_proj;
-    bool m_skip_map_projection;
-    bool m_skip_datum_conversion;
-
-    /* Converts between datums. The parameter 'forward' specifies whether
-     * we convert forward (true) or reverse (false).
-    */
-    Vector2 datum_convert(Vector2 const& v, bool forward) const;
+    GeoReference  m_src_georef;
+    GeoReference  m_dst_georef;
+    BBox2         m_src_bbox,
+                  m_dst_bbox;
+    ProjContext   m_src_datum_proj,
+                  m_dst_datum_proj;
+    bool          m_skip_map_projection;
+    bool          m_skip_datum_conversion;
+    mutable Mutex m_mutex; // Used to control access to the ProjContext objects
 
   public:
+  
+    /// Default constructor, does not generate a usable object.
+    GeoTransform() {}
+
+    GeoTransform(GeoTransform const& other);
+
     /// Normal constructor
-    GeoTransform(GeoReference const& src_georef, GeoReference const& dst_georef);
+    GeoTransform(GeoReference const& src_georef, GeoReference const& dst_georef,
+                 BBox2 const& src_bbox = BBox2i(0, 0, 0, 0),
+                 BBox2 const& dst_bbox = BBox2i(0, 0, 0, 0));
+
+    GeoTransform& operator=(GeoTransform const& other);
+
+    //---------------------------------------------------------------
+    // These functions implement the Transform interface and allow
+    //  this class to be passed in to functions expecting a Transform object.
+
+    /// Given a pixel coordinate of an image in a source
+    /// georeference frame, this routine computes the corresponding
+    /// pixel in the destination (transformed) image.
+    Vector2 forward(Vector2 const& v) const {return pixel_to_pixel(v);}
 
     /// Given a pixel coordinate of an image in a destination
     /// georeference frame, this routine computes the corresponding
     /// pixel from an image in the source georeference frame.
-    Vector2 reverse(Vector2 const& v) const {
-      if (m_skip_map_projection)
-        return m_src_georef.point_to_pixel(m_dst_georef.pixel_to_point(v));
-      if(m_skip_datum_conversion)
-        return m_src_georef.lonlat_to_pixel(m_dst_georef.pixel_to_lonlat(v));
-      Vector2 dst_lonlat = m_dst_georef.pixel_to_lonlat(v);
-      dst_lonlat = datum_convert(dst_lonlat, false);
-      return m_src_georef.lonlat_to_pixel(dst_lonlat);
-    }
+    Vector2 reverse(Vector2 const& v) const;
 
-    /// Given a pixel coordinate of an image in a source
-    /// georeference frame, this routine computes the corresponding
-    /// pixel the destination (transformed) image.
-    Vector2 forward(Vector2 const& v) const {
-      if (m_skip_map_projection)
-        return m_dst_georef.point_to_pixel(m_src_georef.pixel_to_point(v));
-      if(m_skip_datum_conversion)
-        return m_dst_georef.lonlat_to_pixel(m_src_georef.pixel_to_lonlat(v));
-      Vector2 src_lonlat = m_src_georef.pixel_to_lonlat(v);
-      src_lonlat = datum_convert(src_lonlat, true);
-      return m_dst_georef.lonlat_to_pixel(src_lonlat);
-    }
-
-    // We override forward_bbox so it understands to check if the image
-    // crosses the poles or not.
+    /// Convert a pixel bounding box in the source image to
+    ///  a pixel bounding box in the destination image.
+    /// - This function handles the case where the image crosses the poles.
     BBox2i forward_bbox( BBox2i const& bbox ) const;
 
-    // We do the same for reverse_bbox
+    /// As forward_bbox, but from destination to source.
     BBox2i reverse_bbox( BBox2i const& bbox ) const;
-  };
+
+
+    //------------------------------------------------------------
+    // These functions do not implement the Transform interface.
+
+    /// Convert a pixel in the source to a pixel in the destination.
+    Vector2 pixel_to_pixel( Vector2 const& v ) const;
+
+    /// Convert a point in the source to a point (projected coords) in the destination.
+    Vector2 point_to_point( Vector2 const& v ) const;
+
+    /// Convert a pixel in the source to a point (projected coords) in the destination.
+    Vector2 pixel_to_point( Vector2 const& v ) const;
+
+    /// Convert a point in the source to a pixel in the destination.
+    Vector2 point_to_pixel( Vector2 const& v ) const;
+
+    /// Converts lonlat coords, taking the datums into account.
+    /// - The parameter 'forward' specifies whether we convert forward (true) or reverse (false).
+    Vector2 lonlat_to_lonlat(Vector2 const& lonlat, bool forward=true) const;
+
+    /// Converts lonlatalt coords, taking the datums into account.
+    /// - The parameter 'forward' specifies whether we convert forward (true) or reverse (false).
+    Vector3 lonlatalt_to_lonlatalt(Vector3 const& lonlatalt, bool forward=true) const;
+
+    /// Returns true if bounding box conversions wrap around the output
+    ///  georeference, creating a very large bounding box.
+    bool check_bbox_wraparound() const;
+
+
+    /// Convert a lonlat bounding box in the source to a lonlat in the destination.
+    BBox2 lonlat_to_lonlat_bbox( BBox2 const& pixel_bbox ) const;
+
+    /// Convert a pixel bounding box in the source to a point (projected coords)
+    ///  bounding box in the destination.
+    BBox2 pixel_to_pixel_bbox( BBox2 const& pixel_bbox ) const {return(forward_bbox(pixel_bbox));}
+
+    /// Convert a pixel bounding box in the source to a point (projected coords)
+    ///  bounding box in the destination.
+    BBox2 pixel_to_point_bbox( BBox2 const& pixel_bbox ) const;
+
+    /// Convert a point bounding box in the source to a pixel bounding box in the destination.
+    BBox2 point_to_pixel_bbox( BBox2 const& point_bbox ) const;
+
+    
+    friend std::ostream& operator<<(std::ostream& os, const GeoTransform& trans);
+  }; // End class GeoTransform
+
+  /// Format a GeoTransform to a text stream (for debugging)
+  std::ostream& operator<<(std::ostream& os, const GeoTransform& trans);
 
 
   // ---------------------------------------------------------------------------
-  // Functional API
+  // Image View Functions
   // ---------------------------------------------------------------------------
+
+
 
   /// Returns a transformed image view.  The user can specify the type
   /// of interpolation and edge extension to be done by supplying the
@@ -129,8 +187,7 @@ namespace cartography {
   /// This variant of transform allows the user to specify the
   /// dimensions of the transformed image.  The upper left hand point
   /// (0,0) stays fixed.  For a more flexible method of cropping to an
-  /// arbitrary bounding box, use one of the transform methods defined
-  /// below.
+  /// arbitrary bounding box, use one of the transform methods defined below.
   template <class ImageT, class EdgeT, class InterpT>
   TransformView<InterpolationView<EdgeExtensionView<ImageT, EdgeT>, InterpT>, GeoTransform>
   inline geo_transform( ImageViewBase<ImageT> const& v,
@@ -172,6 +229,11 @@ namespace cartography {
     return TransformView<InterpolationView<EdgeExtensionView<ImageT, ZeroEdgeExtension>, BilinearInterpolation>, GeoTransform>
       (interpolate(v, BilinearInterpolation(), ZeroEdgeExtension()), GeoTransform(src_georef,dst_georef), width, height);
   }
+
+
+  // ---------------------------------------------------------------------------
+  // Miscellaneous Functions
+  // ---------------------------------------------------------------------------
 
 
   /// Reproject an image whose pixels contain 3D points (usually in

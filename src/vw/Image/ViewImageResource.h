@@ -19,8 +19,7 @@
 /// \file ViewImageResource.h
 ///
 /// This ImageResource can wrap any vision workbench image view so
-/// that it can be presented as an ImageResource to other
-/// subsystems.
+/// that it can be presented as an ImageResource to other subsystems.
 ///
 #ifndef __VW_IMAGE_VIEW_IMAGERESOURCE_H__
 #define __VW_IMAGE_VIEW_IMAGERESOURCE_H__
@@ -36,7 +35,7 @@ namespace vw {
   template <class ViewT> struct ViewDataAccessor {
     static boost::shared_array<const uint8> data(ViewT const& /*view*/) {
       vw_throw(NoImplErr() << "ViewDataAccessor native_ptr() failed. This view does not support direct data access.");
-      return boost::shared_array<const uint8>(NULL); // never reached
+      return boost::shared_array<const uint8>(); // never reached
     }
   };
 
@@ -48,7 +47,8 @@ namespace vw {
     }
   };
 
-
+  /// Used internally by the ViewImageResource class.
+  /// - ??
   template <class ViewT>
   class ViewImageResourceImpl : public SrcImageResource {
   private:
@@ -62,10 +62,10 @@ namespace vw {
 
     virtual ImageFormat format() const { return m_view.format(); }
 
-    virtual bool has_block_write() const  {return false;}
+    virtual bool has_block_write () const {return false;}
     virtual bool has_nodata_write() const {return false;}
-    virtual bool has_block_read() const   {return false;}
-    virtual bool has_nodata_read() const  {return false;}
+    virtual bool has_block_read  () const {return false;}
+    virtual bool has_nodata_read () const {return false;}
 
     /// Read the image resource at the given location into the given buffer.
     virtual void read( ImageBuffer const& buf, BBox2i const& bbox ) const {
@@ -82,7 +82,8 @@ namespace vw {
     }
   };
 
-  /// Base class from which specific image resources derive.
+  /// This ImageResource can wrap any vision workbench image view so
+  /// that it can be presented as an ImageResource to other subsystems.
   class ViewImageResource : public SrcImageResource {
     boost::shared_ptr<SrcImageResource> m_rsrc;
     Vector2i m_block_size;
@@ -105,10 +106,10 @@ namespace vw {
       return m_rsrc->read(buf, bbox);
     }
 
-    virtual bool has_block_write() const  {return false;}
+    virtual bool has_block_write () const {return false;}
     virtual bool has_nodata_write() const {return false;}
-    virtual bool has_block_read() const   {return true;}
-    virtual bool has_nodata_read() const  {return false;}
+    virtual bool has_block_read  () const {return true; }
+    virtual bool has_nodata_read () const {return false;}
 
     /// Returns the optimal block size/alignment for partial reads
     virtual Vector2i block_read_size() const { return m_block_size; }

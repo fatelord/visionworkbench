@@ -27,6 +27,7 @@
 #include <vw/Image/Interpolation.h>
 #include <vw/InterestPoint/Detector.h>
 #include <vw/InterestPoint/IntegralImage.h>
+#include <vw/InterestPoint/IntegralInterestOperator.h>
 #include <deque>
 
 namespace vw {
@@ -101,9 +102,10 @@ namespace ip {
 
       ip.orientation = greatest_ori;
     }
-  };
+  }; // End class AssignOrientation
 
-  // IntegralInterestPointDetector
+
+  /// InterestDetector implementation for all detectors with operate off of an integral image.
   template <class InterestT>
   class IntegralInterestPointDetector : public InterestDetectorBase<IntegralInterestPointDetector<InterestT> >,
                                         private boost::noncopyable {
@@ -112,8 +114,8 @@ namespace ip {
     static const int IP_DEFAULT_SCALES = 8;
 
     /// Setting max_points = 0 will disable interest point culling.
-    IntegralInterestPointDetector( int max_points = 1000 )
-      : m_interest(InterestT()), m_scales(IP_DEFAULT_SCALES), m_max_points(max_points) {}
+    IntegralInterestPointDetector( int max_points = 1000, int num_scales = IP_DEFAULT_SCALES )
+      : m_interest(InterestT()), m_scales(num_scales), m_max_points(max_points) {}
 
     IntegralInterestPointDetector( InterestT const& interest, int max_points = 1000 )
       : m_interest(interest), m_scales(IP_DEFAULT_SCALES), m_max_points(max_points) {}
@@ -123,14 +125,15 @@ namespace ip {
 
     /// Detect Interest Points in the source image.
     template <class ViewT>
-    InterestPointList process_image(ImageViewBase<ViewT> const& image ) const {
-      typedef ImageView<typename PixelChannelType<typename ViewT::pixel_type>::type> ImageT;
+    InterestPointList process_image(ImageViewBase<ViewT> const& image,
+                                    int desired_num_ip=0 ) const {
+      typedef ImageView<typename PixelChannelType<PixelGray<float> >::type> ImageT;
       typedef ImageInterestData<ImageT,InterestT> DataT;
 
       Timer total("\t\tTotal elapsed time", DebugMessage, "interest_point");
 
       // Rendering own standard copy of the image as the passed in view is just a cropview
-      ImageT original_image = image.impl();
+      ImageView<PixelGray<float> > original_image = pixel_cast_rescale<PixelGray<float> >(image);
 
       // Producing Integral Image
       ImageT integral_image;
@@ -190,11 +193,11 @@ namespace ip {
             l_col.next_col();
             m_col.next_col();
             h_col.next_col();
-          }
+          } // End col loop
           l_row.next_row();
           m_row.next_row();
           h_row.next_row();
-        }
+        } // End row loop
 
         // Thresholding
         threshold(scale_points, interest_data[1], scale-1);
@@ -206,16 +209,22 @@ namespace ip {
 
         // Deleting lowest
         interest_data.pop_front();
-      }
+      } // End scale loop
 
-      if ( m_max_points > 0 ) { // Cull
+      // Handle max_points override
+      int curr_max_points = m_max_points;
+      if (desired_num_ip > 0)
+        curr_max_points = desired_num_ip;
+
+      if ( curr_max_points > 0 ) { // Cull
         vw_out(DebugMessage, "interest_point") << "\tCulling ...";
         Timer t("elapsed time", DebugMessage, "interest_point");
         int original_num_points = new_points.size();
         new_points.sort();
-        if (m_max_points < original_num_points)
-          new_points.resize( m_max_points );
-        vw_out(DebugMessage, "interest_point") << "     (removed " << original_num_points - new_points.size() << " interest points, " << new_points.size() << " remaining.)\n";
+        if (curr_max_points < original_num_points)
+          new_points.resize( curr_max_points );
+        vw_out(DebugMessage, "interest_point") << "     (removed " << original_num_points - new_points.size() 
+                                               << " interest points, " << new_points.size() << " remaining.)\n";
       }
 
       { // Assign orientations
@@ -226,7 +235,7 @@ namespace ip {
       }
 
       return new_points;
-    }
+    } // End function process_image
 
   protected:
 
@@ -265,19 +274,193 @@ namespace ip {
     }
 
     template <class DataT>
-    inline void threshold( InterestPointList& points,
-                           DataT const& img_data,
-                           int const& scale ) const {
+    inline void threshold( InterestPointList      & points,
+                           DataT             const& img_data,
+                           int               const& scale ) const {
       InterestPointList::iterator pos = points.begin();
       while (pos != points.end()) {
-        if (!m_interest.threshold(*pos,
-                                  img_data, scale) )
+        if (!m_interest.threshold(*pos, img_data, scale) )
           pos = points.erase(pos);
         else
           pos++;
       }
     }
   };
+
+
+
+
+// TODO: This inherits from the same base class two different ways!
+
+  /// Implementation of IntegralInterestPointDetector based on OBALoGInterestOperator 
+  class IntegralAutoGainDetector : public InterestDetectorBase<IntegralAutoGainDetector >,
+                                         IntegralInterestPointDetector<OBALoGInterestOperator> {
+  public:
+    // Clear ambiguity of which impl to use. Scope doesn't work.
+    using InterestDetectorBase<IntegralAutoGainDetector>::impl;
+    using InterestDetectorBase<IntegralAutoGainDetector>::operator();
+
+    IntegralAutoGainDetector( size_t max_points = 200, size_t scales = IP_DEFAULT_SCALES )
+      : IntegralInterestPointDetector<OBALoGInterestOperator>( OBALoGInterestOperator(0), scales, max_points ) {}
+
+    /// Detect Interest Points in the source image.
+    template <class ViewT>
+    InterestPointList process_image(vw::ImageViewBase<ViewT> const& image,
+                                    int desired_num_ip=0 ) const {
+      using namespace vw;
+      typedef ImageView<typename PixelChannelType<typename ViewT::pixel_type>::type> ImageT;
+      typedef ip::ImageInterestData<ImageT,ip::OBALoGInterestOperator> DataT;
+      Timer total("\t\tTotal elapsed time", DebugMessage, "interest_point");
+
+      // The input image is a lazy view. We'll rasterize so we're not
+      // hitting the cache all of the image.
+      ImageT original_image = image.impl();
+
+      // The ImageInterestData structure doesn't really apply to
+      // OBALoG. We don't need access to the original image after
+      // we've made the integral image. To avoid excessive copying,
+      // we're making an empty image to feed that structure.
+      ImageT empty_image;
+
+      // Producing Integral Image
+      ImageT integral_image;
+      {
+        vw_out(DebugMessage, "interest_point") << "\tCreating Integral Image ...";
+        Timer t("done, elapsed time", DebugMessage, "interest_point");
+        integral_image = ip::IntegralImage( original_image );
+      }
+
+      // Creating Scales
+      std::deque<DataT> interest_data;
+      interest_data.push_back( DataT(empty_image, integral_image) );
+      interest_data.push_back( DataT(empty_image, integral_image) );
+
+      // Priming scales
+      vw::ip::InterestPointList new_points;
+      {
+        vw_out(DebugMessage, "interest_point") << "\tScale 0 ... ";
+        Timer t("done, elapsed time", DebugMessage, "interest_point");
+        m_interest( interest_data[0], 0 );
+      }
+      {
+        vw_out(DebugMessage, "interest_point") << "\tScale 1 ... ";
+        Timer t("done, elapsed time", DebugMessage, "interest_point");
+        m_interest( interest_data[1], 1 );
+      }
+
+      // Finally processing scales
+      for ( int scale = 2; scale < m_scales; scale++ ) {
+
+        interest_data.push_back( DataT(empty_image, integral_image) );
+        {
+          vw_out(DebugMessage, "interest_point") << "\tScale " << scale << " ... ";
+          Timer t("done, elapsed time", DebugMessage, "interest_point");
+          m_interest( interest_data[2], scale );
+        }
+
+        ip::InterestPointList scale_points;
+
+        // Detecting interest points in middle
+        int32 cols = original_image.cols() - 2;
+        int32 rows = original_image.rows() - 2;
+        typedef typename DataT::interest_type::pixel_accessor AccessT;
+
+        AccessT l_row = interest_data[0].interest().origin();
+        AccessT m_row = interest_data[1].interest().origin();
+        AccessT h_row = interest_data[2].interest().origin();
+        l_row.advance(1,1); m_row.advance(1,1); h_row.advance(1,1);
+        for ( int32 r=0; r < rows; r++ ) {
+          AccessT l_col = l_row;
+          AccessT m_col = m_row;
+          AccessT h_col = h_row;
+          for ( int32 c=0; c < cols; c++ ) {
+            if ( is_extrema( l_col, m_col, h_col ) ) {
+              scale_points.push_back(ip::InterestPoint(c+1,r+1,
+                                                       m_interest.float_scale(scale-1),
+                                                       *m_col) );
+            }
+            l_col.next_col();
+            m_col.next_col();
+            h_col.next_col();
+          }
+          l_row.next_row();
+          m_row.next_row();
+          h_row.next_row();
+        }
+
+        VW_OUT(DebugMessage, "interest_point") << "\tPrior to thresholding there was: "
+                                               << scale_points.size() << "\n";
+
+        // Remove all interest points in the bottom 0.1% of our interest point range
+        float imin, imax;
+        min_max_pixel_values( interest_data[1].interest(), imin, imax );
+        float threshold_lvl = imin + 0.001 * ( imax - imin );
+        VW_OUT(DebugMessage, "interest_point") << "\tInterest threshold for scale: " << threshold_lvl << "\n";
+
+        // Thresholding (in OBALOG this also does Harris)
+        threshold(scale_points, interest_data[1], scale-1, threshold_lvl);
+
+        VW_OUT(DebugMessage, "interest_point") << "\tAfter thresholding there was: "
+                                               << scale_points.size() << "\n";
+
+        // Appending to the greater set
+        new_points.insert(new_points.end(),
+                          scale_points.begin(),
+                          scale_points.end());
+
+        // Deleting lowest
+        interest_data.pop_front();
+      }
+
+      // Handle max_points override
+      int curr_max_points = m_max_points;
+      if (desired_num_ip > 0)
+        curr_max_points = desired_num_ip;
+
+      // Are all points good?
+      if ( curr_max_points < int(new_points.size()) && (curr_max_points > 0) ) {
+        VW_OUT(DebugMessage, "interest_point") << "\tCulling ...\n";
+        Timer t("elapsed time", DebugMessage, "interest_point");
+
+        int original_num_points = new_points.size();
+
+        // Sort the interest of the points and pull out the top amount that the user wants
+        new_points.sort();
+        VW_OUT(DebugMessage, "interest_point") << "\t     Best IP : " << new_points.front().interest << std::endl;
+        VW_OUT(DebugMessage, "interest_point") << "\t     Worst IP: " << new_points.back().interest << std::endl;
+        new_points.resize( curr_max_points );
+
+        VW_OUT(DebugMessage, "interest_point") << "\t     (removed " << original_num_points - new_points.size() 
+                                               << " interest points, " << new_points.size() << " remaining.)\n";
+      } else {
+        VW_OUT(DebugMessage, "interest_point") << "\t     Not culling anything.\n";
+      }
+
+      return new_points;
+    }
+
+  protected:
+
+    template <class DataT>
+    inline void threshold( vw::ip::InterestPointList& points,
+                           DataT const& img_data,
+                           int const& scale, float threshold_lvl ) const {
+      InterestPointList::iterator pos = points.begin();
+      while (pos != points.end()) {
+        if ( pos->interest < threshold_lvl ||
+             !m_interest.threshold(*pos,
+                                   img_data, scale) ) {
+          pos = points.erase(pos);
+        } else {
+          pos++;
+        }
+      }
+    }
+  }; // End class IntegralAutoGainDetector
+
+
+
+
 
 
 }} // end vw::ip

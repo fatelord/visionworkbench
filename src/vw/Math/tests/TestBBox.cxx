@@ -86,10 +86,10 @@ TEST(BBox, Static) {
 TEST(BBox, Dynamic) {
   // Default constructor (floating-point type)
   // Hard to know how to test this one....
-  BBox<float> b1;
+  BBoxNf b1;
 
   // Default constructor (integer type)
-  BBox<uint8> b2;
+  BBox<uint8, 0> b2;
   EXPECT_TRUE( b2.empty() );
 
   // Two-vector constructor
@@ -192,7 +192,7 @@ TEST(BBox, Ops) {
   EXPECT_DOUBLE_EQ( 5, b4.max()[0] );
   EXPECT_DOUBLE_EQ( 6, b4.max()[1] );
 
-  b5.expand(2);
+  b5.expand(Vector2(2,2));
   EXPECT_DOUBLE_EQ( 0, b5.min()[0] );
   EXPECT_DOUBLE_EQ( 0, b5.min()[1] );
   EXPECT_DOUBLE_EQ( 5, b5.max()[0] );
@@ -264,6 +264,9 @@ TEST(BBox, Ops) {
   EXPECT_FALSE( b5.empty());
   b5.min()[0] = b5.max()[0];
   EXPECT_TRUE( b5.empty());
+  
+  BBox2 b6(100, 200, 0, 0);
+  EXPECT_TRUE( b6.empty());
 }
 
 TEST(BBox, Math) {

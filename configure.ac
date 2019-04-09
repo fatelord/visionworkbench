@@ -29,7 +29,6 @@ m4_pattern_allow([^PKG_PATHS_[A-Z_]+$])
 m4_pattern_allow([^PKG_BOOST_INCDIR$])
 m4_pattern_allow([^PKG_BOOST_LIBDIR$])
 m4_pattern_allow([^PKG_VW_LIBS_TEMP$])
-m4_pattern_allow([^PKG_ARBITRARY_QT_NEEDED_HEADERS$])
 
 ##################################################
 # A few starting bits
@@ -118,27 +117,27 @@ fi
 AC_CHECK_PROGS(LCOV, lcov, false)
 AC_CHECK_PROGS(GENHTML, genhtml, false)
 
-# Check for the Apache Extension Tool
-AC_CHECK_PROGS(APXS, apxs2 apxs, false)
-if test "$APXS" != "false"; then
-  APXS_CFLAGS="`$APXS -q CFLAGS` -I`$APXS -q INCLUDEDIR`"
-  APXS_LDFLAGS="`$APXS -q LDFLAGS`"
-  APR_CONFIG=`$APXS -q APR_CONFIG`
-  APU_CONFIG=`$APXS -q APU_CONFIG`
-  APXS_CFLAGS="$APXS_CFLAGS `$APR_CONFIG --cppflags --includes` `$APU_CONFIG --includes`"
-  APXS_LDFLAGS="$APXS_LDFLAGS `$APR_CONFIG --ldflags --libs` `$APU_CONFIG --ldflags --libs`"
-  APXS_DEFAULT_INSTALLDIR="`$APXS -q LIBEXECDIR`"
+## Check for the Apache Extension Tool
+#AC_CHECK_PROGS(APXS, apxs2 apxs, false)
+#if test "$APXS" != "false"; then
+#  APXS_CFLAGS="`$APXS -q CFLAGS` -I`$APXS -q INCLUDEDIR`"
+#  APXS_LDFLAGS="`$APXS -q LDFLAGS`"
+#  APR_CONFIG=`$APXS -q APR_CONFIG`
+#  APU_CONFIG=`$APXS -q APU_CONFIG`
+#  APXS_CFLAGS="$APXS_CFLAGS `$APR_CONFIG --cppflags --includes` `$APU_CONFIG --includes`"
+#  APXS_LDFLAGS="$APXS_LDFLAGS `$APR_CONFIG --ldflags --libs` `$APU_CONFIG --ldflags --libs`"
+#  APXS_DEFAULT_INSTALLDIR="`$APXS -q LIBEXECDIR`"
 
-  AX_ARG_WITH(apxs_installdir, [], [mk], [Set apache module install dir])
+#  AX_ARG_WITH(apxs_installdir, [], [mk], [Set apache module install dir])
 
-  if test -z "$APXS_INSTALLDIR"; then
-    APXS_INSTALLDIR="$APXS_DEFAULT_INSTALLDIR"
-  fi
+#  if test -z "$APXS_INSTALLDIR"; then
+#    APXS_INSTALLDIR="$APXS_DEFAULT_INSTALLDIR"
+#  fi
 
-  AC_SUBST(APXS_CFLAGS)
-  AC_SUBST(APXS_LDFLAGS)
-  fi
-AM_CONDITIONAL(MAKE_MODPLATE, [test "$APXS" != "false"])
+#  AC_SUBST(APXS_CFLAGS)
+#  AC_SUBST(APXS_LDFLAGS)
+#fi
+
 
 
 ##################################################
@@ -147,12 +146,11 @@ AM_CONDITIONAL(MAKE_MODPLATE, [test "$APXS" != "false"])
 
 # For the moment this is just a manual switch, defaulting to off.
 # Someday this should be sensibly autodetected.
-AX_ARG_ENABLE(sse,           no,  [am-yes cpp-bool], [enable SSE optimizations in some places (development)])
+AX_ARG_ENABLE(sse,           no,  [am-yes cpp-bool], [enable SSE optimizations in some places])
 AX_ARG_ENABLE(bounds-check,  no,  [am-yes cpp-bool], [enable image bounds checking (SLOW!)])
 AX_ARG_ENABLE(test-coverage, no,  [am-yes],          [turn on code coverage analysis tools])
 AX_ARG_ENABLE(config-file,   yes, [cpp-bool],        [~/.vwrc support])
 AX_ARG_ENABLE(strict-aliasing, no, [none],           [allow strict aliasing (dangerous)])
-AX_ARG_ENABLE(qt-qmake,      yes, [none],            [Allow qmake detection of QT])
 
 
 ##################################################
@@ -186,13 +184,17 @@ AM_CONDITIONAL(ENABLE_SSE, [test x"$ENABLE_SSE" = x"yes"])
 AM_CONDITIONAL(ENABLE_BOUNDS_CHECK, [test x"$ENABLE_BOUNDS_CHECK" = x"yes"])
 AM_CONDITIONAL(ENABLE_TEST_COVERAGE, [test x"$ENABLE_TEST_COVERAGE" = x"yes"])
 
-
+if test "$ENABLE_SSE" = "yes"; then
+  echo "*** Enabling SSE support ***"
+  dnl Add required flag
+  CXXFLAGS="$CXXFLAGS -msse4.1"
+fi
 
 ##################################################
 # distribution options
 ##################################################
 
-AX_ARG_WITH(dist-remove-modules, [Python Geometry GPU gui Plate], [mk am-set], [remove certain modules from the distribution])
+AX_ARG_WITH(dist-remove-modules, [Python Geometry], [mk am-set], [remove certain modules from the distribution])
 
 # These need to be here because automake-1.6 is dumb and does not properly
 # process AM_CONDITIONALs unless the first argument is a simple string.
@@ -238,7 +240,7 @@ AX_PKG(M, [], [-lm], [math.h])
 
 AX_PKG_ONE_OF(LAPACK,
   APPLE_LAPACK,
-    [AX_PKG_APPLE(LAPACK, [], [-framework vecLib])],
+    [AX_PKG_APPLE(LAPACK, [], [-framework Accelerate])],
   INTEL_LAPACK,
     [case $host_cpu in
        ia64)   AX_PKG(INTEL_LAPACK, [PTHREADS M], [-lmkl_lapack -lmkl -lmkl_i2p -lguide], [mkl_lapack.h], [], [64],    [dgelss_]);;
@@ -274,32 +276,7 @@ AX_PKG_ONE_OF(HDF,
     HDF_SUBDIR, [AX_PKG(HDF_SUBDIR, [M JPEG], [-ldf -lmfhdf], [mfhdf.h], [hdf])]
 )
 
-AX_PKG_ONE_OF(GL,
-  APPLE_GL,
-    [AX_PKG_APPLE([GL], [], [-framework OpenGL -framework GLUT -Wl,-dylib_file,/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib:/System/Library/Frameworks/OpenGL.framework/Versions/A/Libraries/libGL.dylib])],
-  LINUX_GL,
-    [AX_PKG(X11, [], [-lXext -lX11 -lXmu -lXi -lXt], [])
-     AX_PKG(LINUX_GL, [X11], [-lglut -lGLU -lGL], [GL/gl.h GL/glu.h GL/glut.h], [], [], [glCreateShader])])
-
-AX_PKG(GLEW, [GL M], [-lGLEW], [GL/glew.h])
-AX_PKG(CG, [GL], [-lCg -lCgGL], [Cg/cg.h])
-
-AX_PKG(GDAL, [], [-lgdal], [gdal.h])
-
-# GDAL requires tiff support, but it can be internal or external.
-PKG_CHECK_FUNCTION(GDAL, [TIFFScanlineSize], [External_LibTIFF])
-
-if test x"$HAVE_PKG_GDAL" = "xyes"; then
-  HAVE_PKG_TIFF="no:gdal has tiff support"
-  if test x"$GDAL_HAS_EXTERNAL_LIBTIFF" = "xyes"; then
-    PKG_CHECK_FUNCTION(GDAL, [TIFFScanlineSize64], [BigTIFF])
-  else
-    GDAL_HAS_BIGTIFF=yes
-  fi
-  VW_HAS_BIGTIFF="$GDAL_HAS_BIGTIFF"
-fi
-
-AX_PKG(TIFF, [], [-ltiff], [tiff.h])
+AX_PKG(TIFF, [Z JPEG], [-ltiff], [tiff.h])
 if test x"$HAVE_PKG_TIFF" = "xyes"; then
   PKG_CHECK_FUNCTION(TIFF, [TIFFScanlineSize64], [BigTIFF])
   VW_HAS_BIGTIFF="$TIFF_HAS_BIGTIFF"
@@ -314,118 +291,59 @@ fi
 AC_DEFINE_UNQUOTED(HAS_BIGTIFF, [$has_bigtiff], [Define to 1 if VW has BigTIFF support])
 AC_MSG_RESULT([$VW_HAS_BIGTIFF])
 
-AX_PKG(PROJ4, [M], [-lproj], [proj_api.h])
+AX_PKG(PROJ4,   [M],          [-lproj],          [proj_api.h])
+AX_PKG(GEOTIFF, [PROJ4 JPEG], [-lgeotiff -ltiff] )
+AX_PKG(GEOS,    [], [-lgeos -lgeos_c], [geos_c.h])
+AX_PKG(GDAL,    [GEOTIFF GEOS],    [-lgdal],          [gdal.h])
 
-if test "$HAVE_PKG_QT" = no; then
-    ENABLE_QT_QMAKE=no
-fi
+# GDAL requires tiff support, but it can be internal or external.
+PKG_CHECK_FUNCTION(GDAL, [TIFFScanlineSize], [External_LibTIFF])
 
-if test "$ENABLE_QT_QMAKE" = no; then
-  AX_GROUP_PKG([QT_QMAKE])
-else
-  # Qt with AutoTroll.
-  AT_WITH_QT([+gui +sql +opengl +network], [], [], [HAVE_PKG_QT_QMAKE="no:missing QT"], [])
-
-  if test x"$HAVE_PKG_QT_QMAKE" != x"no:missing QT"; then
-      AT_REQUIRE_QT_VERSION([4.0], [HAVE_PKG_QT_QMAKE="no:wrong QT version"], [])
+if test x"$HAVE_PKG_GDAL" = "xyes"; then
+  HAVE_PKG_TIFF="no:gdal has tiff support"
+  if test x"$GDAL_HAS_EXTERNAL_LIBTIFF" = "xyes"; then
+    PKG_CHECK_FUNCTION(GDAL, [TIFFScanlineSize64], [BigTIFF])
+  else
+    GDAL_HAS_BIGTIFF=yes
   fi
-
-  # We seed QT_QMAKE's cppflags and libs with the ones qmake figured out
-  PKG_QT_QMAKE_CPPFLAGS="$PKG_QT_QMAKE_CPPFLAGS `strip_arg -I. $QT_CPPFLAGS`"
-  AX_PKG(QT_QMAKE, [], [$QT_LIBS], [QVector])
+  VW_HAS_BIGTIFF="$GDAL_HAS_BIGTIFF"
 fi
-
-AX_PKG_ONE_OF(QT,
-    ARBITRARY_QT,
-     [if test -z "$QT_ARBITRARY_MODULES" -a -z "$HAVE_PKG_ARBITRARY_MODULES"; then
-        HAVE_PKG_ARBITRARY_QT="no:Set \$QT_ARBITRARY_MODULES"
-      else
-        for module in $QT_ARBITRARY_MODULES; do
-          PKG_ARBITRARY_QT_NEEDED_HEADERS="$PKG_ARBITRARY_QT_NEEDED_HEADERS ${module}"
-        done
-        PKG_ARBITRARY_QT_CPPFLAGS="$PKG_ARBITRARY_QT_CPPFLAGS -DQT_SHARED"
-        AX_PKG(ARBITRARY_QT, [], [-lQtCore], [$PKG_ARBITRARY_QT_NEEDED_HEADERS])
-      fi],
-    APPLE_QMAKE_QT, [AX_PKG_APPLE(QMAKE_QT, [GL QT_QMAKE], [])],
-    LINUX_QMAKE_QT,
-     [AX_PKG(QT_QMAKE_OPENGL, [QT_QMAKE], [], [QtOpenGL])
-      AX_PKG(QT_QMAKE_GUI,    [QT_QMAKE], [], [QLabel])
-      AX_PKG(QT_QMAKE_SQL,    [QT_QMAKE], [], [QtSql])
-      AX_PKG(QT_QMAKE_NETWORK,    [QT_QMAKE], [], [QtNetwork])
-      AX_GROUP_PKG(LINUX_QMAKE_QT, [QT_QMAKE QT_QMAKE_GUI QT_QMAKE_OPENGL QT_QMAKE_SQL QT_QMAKE_NETWORK])],
-    GUESS_QT,
-     [PKG_QT_GUESS_BASE_CPPFLAGS="$PKG_QT_GUESS_BASE_CPPFLAGS -DQT_SHARED"
-      AX_PKG(QT_GUESS_BASE,   [],                           [],           [QtCore/qstring.h])
-      AX_PKG(QT_GUESS_CORE,   [QT_GUESS_BASE],              [-lQtCore],   [QtCore],   [QtCore])
-      AX_PKG(QT_GUESS_GUI,    [QT_GUESS_CORE],              [-lQtGui],    [QtGui],    [QtGui])
-      AX_PKG(QT_GUESS_SQL,    [QT_GUESS_CORE],              [-lQtSql],    [QtSql],    [QtSql])
-      AX_PKG(QT_GUESS_NETWORK,[QT_GUESS_CORE],              [-lQtNetwork],[QtNetwork],[QtNetwork])
-      AX_PKG(QT_GUESS_OPENGL, [QT_GUESS_CORE QT_GUESS_GUI], [-lQtOpenGL], [QtOpenGL], [QtOpenGL])
-      AX_GROUP_PKG(GUESS_QT,  [QT_GUESS_BASE QT_GUESS_CORE QT_GUESS_GUI QT_GUESS_SQL QT_GUESS_NETWORK QT_GUESS_OPENGL])])
 
 PKG_CHECK_MODULES([CAIROMM], [cairomm-1.0], [
   PKG_CAIROMM_CPPFLAGS="$PKG_CAIROMM_CPPFLAGS $CAIROMM_CFLAGS"
   ], [HAVE_PKG_CAIROMM="no:$CAIROMM_PKG_ERRORS"])
 AX_PKG(CAIROMM, [], [$CAIROMM_LIBS], [cairomm/cairomm.h])
 
-AX_PKG(RABBITMQ_C, [], [-lrabbitmq], [stdlib.h stdint.h amqp.h])
-AX_PKG(ZEROMQ,     [], [-lzmq],      [zmq.hpp])
-AX_PKG(PROTOBUF, [PTHREADS], [-lprotobuf], [google/protobuf/stubs/common.h])
-AC_PATH_TOOL( PROTOC, [protoc], [no], [$PKG_PATHS_PROTOBUF/bin$PATH_SEPARATOR$PATH])
-if test x"$PROTOC" = "xno" && test x"$HAVE_PKG_PROTOBUF" = "xyes"; then
-  AC_MSG_ERROR([cannot find protoc used by protobuf])
-fi
+#Usage: AX_PKG(<name>, <dependencies>, <libraries>, <headers>[, <relative include path>, <relative lib path>, <required-functions>, <optional-deps>])
 AX_PKG(LIBKML,   [BOOST_THREAD BOOST Z], [-lkmlengine -lkmldom -lkmlbase -lminizip], [kml/engine/kmz_file.h])
-AX_PKG(OPENCV,     [], [-lcxcore],   [opencv/cxcore.h])
+AX_PKG(OPENCV,     [], [-lopencv_core -lopencv_imgproc -lopencv_features2d -lopencv_xfeatures2d -lopencv_flann],  [ opencv2/core.hpp  opencv2/imgproc/imgproc.hpp opencv2/features2d.hpp opencv2/xfeatures2d.hpp opencv2/objdetect.hpp opencv2/calib3d.hpp])
 AX_PKG(FLANN,      [], [-lflann_cpp],[flann/flann.hpp])
-
-old_CXXFLAGS="$CXXFLAGS"
-old_LDFLAGS="$LDFLAGS"
-CXXFLAGS="$CXXFLAGS $PKG_RABBITMQ_C_CPPFLAGS"
-LDFLAGS="$LDFLAGS $PKG_RABBITMQ_C_LIBS"
-if test x"$HAVE_PKG_RABBITMQ_C" = "xyes"; then
-  AC_COMPILE_IFELSE([AC_LANG_PROGRAM([[
-    #include <stdlib.h>
-    #include <stdint.h>
-    #include <amqp.h>
-  ]], [[
-    amqp_rpc_reply_t x;
-    x.library_error;
-  ]])], [], [
-    HAVE_PKG_RABBITMQ_C="no:current version is too old"
-    AX_PKG(RABBITMQ_C, [], [-lrabbitmq], [stdlib.h stdint.h amqp.h])])
-fi
-CXXFLAGS="$old_CXXFLAGS"
-LDFLAGS="$old_LDFLAGS"
 
 # These are here (instead of inside the PKG macro where they belong)
 # for backwards compatability with older versions of automake.
-AM_CONDITIONAL(HAVE_PKG_LAPACK, [test "$HAVE_PKG_LAPACK" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_PNG, [test "$HAVE_PKG_PNG" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_JPEG, [test "$HAVE_PKG_JPEG" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_TIFF, [test "$HAVE_PKG_TIFF" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_OPENEXR, [test "$HAVE_PKG_OPENEXR" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_HDF, [test "$HAVE_PKG_HDF" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_GDAL, [test "$HAVE_PKG_GDAL" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_CAIROMM, [test "$HAVE_PKG_CAIROMM" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_RABBITMQ_C, [test "$HAVE_PKG_RABBITMQ_C" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_ZEROMQ, [test "$HAVE_PKG_ZEROMQ" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_PROTOBUF, [test "$HAVE_PKG_PROTOBUF" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_LIBKML, [test "$HAVE_PKG_LIBKML" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_OPENCV, [test "$HAVE_PKG_OPENCV" = "yes"])
-AM_CONDITIONAL(HAVE_PKG_FLANN, [test "$HAVE_PKG_FLANN" = "yes"])
-AM_CONDITIONAL(HAVE_PYTHON, [test "$HAVE_PYTHON" = "yes"])
+AM_CONDITIONAL(HAVE_PKG_LAPACK,     [test "$HAVE_PKG_LAPACK"     = "yes"])
+AM_CONDITIONAL(HAVE_PKG_PNG,        [test "$HAVE_PKG_PNG"        = "yes"])
+AM_CONDITIONAL(HAVE_PKG_JPEG,       [test "$HAVE_PKG_JPEG"       = "yes"])
+AM_CONDITIONAL(HAVE_PKG_TIFF,       [test "$HAVE_PKG_TIFF"       = "yes"])
+AM_CONDITIONAL(HAVE_PKG_OPENEXR,    [test "$HAVE_PKG_OPENEXR"    = "yes"])
+AM_CONDITIONAL(HAVE_PKG_HDF,        [test "$HAVE_PKG_HDF"        = "yes"])
+AM_CONDITIONAL(HAVE_PKG_GDAL,       [test "$HAVE_PKG_GDAL"       = "yes"])
+AM_CONDITIONAL(HAVE_PKG_CAIROMM,    [test "$HAVE_PKG_CAIROMM"    = "yes"])
+AM_CONDITIONAL(HAVE_PKG_LIBKML,     [test "$HAVE_PKG_LIBKML"     = "yes"])
+AM_CONDITIONAL(HAVE_PKG_OPENCV,     [test "$HAVE_PKG_OPENCV"     = "yes"])
+AM_CONDITIONAL(HAVE_PKG_FLANN,      [test "$HAVE_PKG_FLANN"      = "yes"])
+AM_CONDITIONAL(HAVE_PYTHON,         [test "$HAVE_PYTHON"         = "yes"])
 
 
 ##################################################
 # module definitions
 ##################################################
 
-AX_MODULE(CORE,          [src/vw/Core],          [libvwCore.la],          yes, [],      [BOOST BOOST_PROGRAM_OPTIONS THREADS M], [PTHREADS])
-AX_MODULE(MATH,          [src/vw/Math],          [libvwMath.la],          yes, [CORE],  [BOOST_GRAPH],                           [LAPACK FLANN])
-AX_MODULE(IMAGE,         [src/vw/Image],         [libvwImage.la],         yes, [MATH],  [],                                      [OPENCV])
-AX_MODULE(FILEIO,        [src/vw/FileIO],        [libvwFileIO.la],        yes, [IMAGE], [BOOST_FILESYSTEM],                      [Z PNG JPEG TIFF OPENEXR HDF GDAL])
-AX_MODULE(VW,            [src/vw],               [libvw.la],              yes, [],      [IMAGE MATH CORE],                       [FILEIO])
+AX_MODULE(CORE,   [src/vw/Core],   [libvwCore.la],   yes, [],      [BOOST BOOST_PROGRAM_OPTIONS THREADS M], [PTHREADS])
+AX_MODULE(MATH,   [src/vw/Math],   [libvwMath.la],   yes, [CORE],  [BOOST_GRAPH],                           [LAPACK FLANN])
+AX_MODULE(IMAGE,  [src/vw/Image],  [libvwImage.la],  yes, [MATH],  [OPENCV],                                [])
+AX_MODULE(FILEIO, [src/vw/FileIO], [libvwFileIO.la], yes, [IMAGE], [BOOST_FILESYSTEM GDAL],                      [PNG JPEG TIFF Z OPENEXR HDF])
+AX_MODULE(VW,     [src/vw],        [libvw.la],       yes, [],      [IMAGE MATH CORE FILEIO],                [])
 
 if test "${MAKE_MODULE_VW}" != "yes"; then
   AC_MSG_ERROR([cannot build the Vision Workbench core modules!])
@@ -442,51 +360,45 @@ for i in $PKG_VW_LIBS; do
 done
 PKG_VW_LIBS="$PKG_VW_LIBS_TEMP"
 
-AX_MODULE(CAMERA,           [src/vw/Camera],           [libvwCamera.la],           yes, [VW],               [],                      [BOOST_IOSTREAMS PROTOBUF])
+AX_MODULE(CAMERA,           [src/vw/Camera],           [libvwCamera.la],           yes, [VW],               [],                      [BOOST_IOSTREAMS])
 AX_MODULE(INTERESTPOINT,    [src/vw/InterestPoint],    [libvwInterestPoint.la],    yes, [VW])
-AX_MODULE(CARTOGRAPHY,      [src/vw/Cartography],      [libvwCartography.la],      yes, [VW],        [PROJ4],            [GDAL PROTOBUF])
+AX_MODULE(CARTOGRAPHY,      [src/vw/Cartography],      [libvwCartography.la],      yes, [VW],        [PROJ4 GDAL],            [])
 AX_MODULE(MOSAIC,           [src/vw/Mosaic],           [libvwMosaic.la],           yes, [CARTOGRAPHY VW])
 AX_MODULE(HDR,              [src/vw/HDR],              [libvwHDR.la],              yes, [CAMERA VW], [LAPACK])
 AX_MODULE(STEREO,           [src/vw/Stereo],           [libvwStereo.la],           yes, [CAMERA VW])
 AX_MODULE(GEOMETRY,         [src/vw/Geometry],         [libvwGeometry.la],         yes, [VW])
 AX_MODULE(BUNDLEADJUSTMENT, [src/vw/BundleAdjustment], [libvwBundleAdjustment.la], yes, [CAMERA CARTOGRAPHY INTERESTPOINT STEREO VW])
-AX_MODULE(PLATE,            [src/vw/Plate],            [libvwPlate.la],             no, [CARTOGRAPHY VW], [PROTOBUF GDAL BOOST_FILESYSTEM BOOST_REGEX BOOST_IOSTREAMS BOOST_PROGRAM_OPTIONS THREADS], [RABBITMQ_C ZEROMQ LIBKML])
-AS_IF([test x"$MAKE_MODULE_PLATE" = "xyes"],
-  [AS_IF([test x"$HAVE_PKG_RABBITMQ_C" != "xyes"],
-      [AS_IF([test x"$HAVE_PKG_ZEROMQ" != "xyes"],
-        [AC_MSG_WARN([You have neither rabbitmq_c nor zeromq. Plate network support will be disabled.])])])])
 
-AX_MODULE(TOOLS,            [src/vw/tools],            [],                         yes, [VW], [BOOST_FILESYSTEM BOOST_PROGRAM_OPTIONS THREADS])
-AX_MODULE(GUI,              [src/vw/gui],              [],                          no, [VW], [QT BOOST_PROGRAM_OPTIONS GL], [PLATE])
-AX_MODULE_PYTHON(           [src/vw/Python], [no])
+AX_MODULE(TOOLS,   [src/vw/tools],  [],     yes, [VW], [BOOST_FILESYSTEM BOOST_PROGRAM_OPTIONS THREADS])
+# Would like to delete this module but the googlenasa tools that populate the 
+#  Google Earth Mars content actually depend on it!  We don't need to build it 
+#  all the time, but don't delete it until the googlenasa stuff dies.
+AX_MODULE_PYTHON(  [src/vw/Python], [no])
 
-if test $host_vendor = apple; then
-  AX_MODULE(GPU,         [src/vw/GPU],           [libvwGPU.la],           no,  [VW],        [GL],               [CG])
-else
-  AX_MODULE(GPU,         [src/vw/GPU],           [libvwGPU.la],           no,  [VW],        [GL GLEW],          [CG])
-fi
+AX_MODULE(FLOOD_DETECT,   [src/vw/tools],  [],     yes, [VW], [BOOST_FILESYSTEM BOOST_PROGRAM_OPTIONS THREADS])
+
 
 # These are here (instead of inside the MODULE macro where they belong)
 # for backwards compatability with older versions of automake.
-AM_CONDITIONAL(MAKE_MODULE_CORE,             [test "$MAKE_MODULE_CORE" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_MATH,             [test "$MAKE_MODULE_MATH" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_IMAGE,            [test "$MAKE_MODULE_IMAGE" = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_CORE,             [test "$MAKE_MODULE_CORE"   = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_MATH,             [test "$MAKE_MODULE_MATH"   = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_IMAGE,            [test "$MAKE_MODULE_IMAGE"  = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_FILEIO,           [test "$MAKE_MODULE_FILEIO" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_VW,               [test "$MAKE_MODULE_VW" = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_VW,               [test "$MAKE_MODULE_VW"     = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_CAMERA,           [test "$MAKE_MODULE_CAMERA" = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_MOSAIC,           [test "$MAKE_MODULE_MOSAIC" = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_INTERESTPOINT,    [test "$MAKE_MODULE_INTERESTPOINT" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_CARTOGRAPHY,      [test "$MAKE_MODULE_CARTOGRAPHY" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_HDR,              [test "$MAKE_MODULE_HDR" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_STEREO,           [test "$MAKE_MODULE_STEREO" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_GEOMETRY,         [test "$MAKE_MODULE_GEOMETRY" = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_CARTOGRAPHY,      [test "$MAKE_MODULE_CARTOGRAPHY"   = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_HDR,              [test "$MAKE_MODULE_HDR"           = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_STEREO,           [test "$MAKE_MODULE_STEREO"        = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_GEOMETRY,         [test "$MAKE_MODULE_GEOMETRY"      = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_BUNDLEADJUSTMENT, [test "$MAKE_MODULE_BUNDLEADJUSTMENT" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_PLATE,            [test "$MAKE_MODULE_PLATE" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_TOOLS,            [test "$MAKE_MODULE_TOOLS" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_GUI,              [test "$MAKE_MODULE_GUI" = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_TOOLS,            [test "$MAKE_MODULE_TOOLS"  = "yes"])
 AM_CONDITIONAL(MAKE_MODULE_PYTHON,           [test "$MAKE_MODULE_PYTHON" = "yes"])
-AM_CONDITIONAL(MAKE_MODULE_GPU,              [test "$MAKE_MODULE_GPU" = "yes"])
+AM_CONDITIONAL(MAKE_MODULE_FLOOD_DETECT,     [test "$MAKE_MODULE_FLOOD_DETECT" = "yes"])
 
+# Option to turn off building a bunch of apps we never use anymore
+AM_CONDITIONAL(MAKE_APP_LEGACY, [test "$MAKE_APP_LEGACY" = "yes"])
 
 ##################################################
 # final processing
@@ -524,11 +436,6 @@ AC_CONFIG_FILES([                       \
   src/test/Makefile                     \
   src/vw/Makefile                       \
   src/vw/tools/Makefile                 \
-  src/vw/gui/Makefile                   \
-  src/vw/Plate/Makefile                 \
-  src/vw/Plate/tests/Makefile           \
-  src/vw/Plate/google/Makefile          \
-  src/vw/Plate/google/sparsehash/Makefile \
   src/vw/Core/Makefile                  \
   src/vw/Core/tests/Makefile            \
   src/vw/Math/Makefile                  \
@@ -547,8 +454,6 @@ AC_CONFIG_FILES([                       \
   src/vw/HDR/tests/Makefile             \
   src/vw/Stereo/Makefile                \
   src/vw/Stereo/tests/Makefile          \
-  src/vw/GPU/Makefile                   \
-  src/vw/GPU/tests/Makefile             \
   src/vw/Geometry/Makefile              \
   src/vw/Geometry/tests/Makefile        \
   src/vw/InterestPoint/Makefile         \

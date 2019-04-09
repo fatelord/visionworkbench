@@ -496,7 +496,7 @@ TEST( Statistics, MedianChannel ) {
   image1(1,0) = PixelRGBA<vw::uint8>(4,3,2,1);
   image1(2,0) = PixelRGBA<vw::uint8>(9,8,7,0);
   image1(3,0) = PixelRGBA<vw::uint8>(12,11,10,0);
-  EXPECT_EQ( median_channel_value(image1), 7 );
+  EXPECT_EQ( median_channel_value(image1), 6 ); // 6.5 actually if float
   ASSERT_TRUE( is_of_type<vw::uint8>( median_channel_value(image1) ) );
   ImageView<PixelMask<PixelRGB<vw::uint8> > > image2(4,1);
   image2(0,0) = PixelMask<PixelRGB<vw::uint8> >(8,7,6);
@@ -505,24 +505,60 @@ TEST( Statistics, MedianChannel ) {
   image2(2,0).invalidate();
   image2(3,0) = PixelMask<PixelRGB<vw::uint8> >(12,11,10);
   image2(3,0).invalidate();
-  EXPECT_EQ( median_channel_value(image2), 6 );
+  EXPECT_EQ( median_channel_value(image2), 5 );
   ASSERT_TRUE( is_of_type<vw::uint8>( median_channel_value(image2) ) );
 }
 
 TEST( Statistics, Histogram ) {
   
-  std::vector<double> hist;
+  vw::math::Histogram hist;
   int num_bins = 256;
   histogram(im8b, num_bins, hist);
 
-  EXPECT_EQ(hist[0],   2);
-  EXPECT_EQ(hist[24],  1);
-  EXPECT_EQ(hist[119], 2);
-  EXPECT_EQ(hist[255], 1);
+  EXPECT_EQ(hist.get_bin_value(  0), 2);
+  EXPECT_EQ(hist.get_bin_value( 24), 1);
+  EXPECT_EQ(hist.get_bin_value(119), 2);
+  EXPECT_EQ(hist.get_bin_value(255), 1);
 }
 
 TEST( Statistics, OptimalThreshold ) {
   double t  = optimal_threshold(im8b);
   double t0 = 0.27843137254902; // Computed in Matlab, t0 = graythresh(uint8_im)
   EXPECT_NEAR(t, t0, 1e-15);
+}
+
+TEST(BlockOperations, DISABLED_CDF) {
+
+  const Vector2i block_size(128, 128);
+  int sumsample_amount = 1;
+
+  // Generate a test image.
+  size_t real_count = 0;
+  const int size = 512;
+  ImageView<uint8> image(size,size);
+  for (int i=0; i<size; ++i) {
+    for (int j=0; j<size; ++j) {
+      uint8 value = i % 10;
+      image(i,j) = value;
+    }
+  }
+
+  // Compute the CDF in using a single thread.
+  ChannelAccumulator<vw::math::CDFAccumulator<float> > normal_cdf;
+  for_each_pixel( subsample( edge_extend(image, ConstantEdgeExtension()),
+                             sumsample_amount ),
+                  normal_cdf );
+
+  // Compute the CDF in parallel.
+  vw::math::CDFAccumulator<float> parallel_cdf;
+  block_cdf_computation(image, parallel_cdf, sumsample_amount, block_size);
+
+  // Check results.
+  const float EPS = 0.11; // Larger sample sizes reduce this error
+  EXPECT_NEAR(normal_cdf.quantile(0),          parallel_cdf.quantile(0), EPS);
+  EXPECT_NEAR(normal_cdf.quantile(1),          parallel_cdf.quantile(1), EPS);
+  EXPECT_NEAR(normal_cdf.approximate_mean  (), parallel_cdf.approximate_mean  (), EPS);
+  EXPECT_NEAR(normal_cdf.approximate_stddev(), parallel_cdf.approximate_stddev(), EPS);
+  EXPECT_NEAR(normal_cdf.quantile(0.02),       parallel_cdf.quantile(0.02), EPS);
+  EXPECT_NEAR(normal_cdf.quantile(0.98),       parallel_cdf.quantile(0.98), EPS);
 }

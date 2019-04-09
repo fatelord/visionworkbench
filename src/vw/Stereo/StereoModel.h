@@ -33,6 +33,7 @@ namespace vw {
 
 namespace stereo {
 
+  /// 
   class StereoModel {
 
   public:
@@ -40,9 +41,17 @@ namespace stereo {
     //------------------------------------------------------------------
     // Constructors / Destructors
     //------------------------------------------------------------------
+    // Constructor with n cameras
+    StereoModel(std::vector<const camera::CameraModel *> const& cameras,
+                bool least_squares_refine = false, double angle_tol = 0.0);
+    // Constructor with two cameras
     StereoModel(camera::CameraModel const* camera_model1,
                 camera::CameraModel const* camera_model2,
-                bool least_squares_refine = false);
+                bool least_squares_refine = false,
+                double angle_tol = 0.0);
+
+    // This class does not modify the input models.
+    virtual ~StereoModel() {}
 
     //------------------------------------------------------------------
     // Public Methods
@@ -54,16 +63,17 @@ namespace stereo {
     ///
     /// Users really shouldn't use this method, the ideal method is
     /// the 'stereo_triangulate' in StereoView.h.
-    ImageView<Vector3> operator()(ImageView<PixelMask<Vector2f> > const& disparity_map,
+    ImageView<Vector3> operator()(ImageView<PixelMask<Vector2f> > const&
+                                  disparity_map,
                                   ImageView<double> &error ) const;
 
-    /// Apply a stereo model to a single pair of image coordinates.
-    /// Returns an xyz point.  The error is set to -1 if the rays were
-    /// parallel or divergent, otherwise it returns the 2-norm of the
-    /// distance between the rays at their nearest point of
-    /// intersection.
-    virtual Vector3 operator()(Vector2 const& pix1, Vector2 const& pix2, Vector3& errorVec ) const;
-    virtual Vector3 operator()(Vector2 const& pix1, Vector2 const& pix2, double& error ) const;
+    /// Apply a stereo model to multiple or just two image coordinates.
+    /// Returns an xyz point. The error is set to 0 if triangulation
+    /// did not succeed, otherwise it is the vector between the closest points on the rays.
+    virtual Vector3 operator()(std::vector<Vector2> const& pixVec,                      Vector3& errorVec ) const;
+    virtual Vector3 operator()(std::vector<Vector2> const& pixVec,                      double & error    ) const;
+    virtual Vector3 operator()(Vector2              const& pix1,   Vector2 const& pix2, Vector3& errorVec ) const;
+    virtual Vector3 operator()(Vector2              const& pix1,   Vector2 const& pix2, double & error    ) const;
 
     /// Returns the dot product of the two rays emanating from camera
     /// 1 and camera 2 through pix1 and pix2 respectively.  This can
@@ -72,10 +82,15 @@ namespace stereo {
     /// two rays are close to parallel.
     double convergence_angle(Vector2 const& pix1, Vector2 const& pix2) const;
 
+    // The default 1-cos(x) function does badly when x close to 0,
+    // which then leads to incorrect angle tolerance.
+    static double robust_1_minus_cos(double x);
+      
   protected:
 
-    const camera::CameraModel *m_camera1, *m_camera2;
+    std::vector<const camera::CameraModel *> m_cameras;
     bool m_least_squares;
+    double m_angle_tol;
 
     //------------------------------------------------------------------
     // Protected Methods
@@ -83,19 +98,17 @@ namespace stereo {
 
     /// Return the 2-norm of the error vector ( the vector from the
     /// closest point of intersectio of A to the closest point of
-    /// intersection of B ), or -1 if the rays are parallel or
-    /// divergent.
-    Vector3 triangulate_point(Vector3 const& point1,
-                              Vector3 const& vec1,
-                              Vector3 const& point2,
-                              Vector3 const& vec2,
-                              Vector3& errorVec) const;
-
-    bool are_nearly_parallel(Vector3 const& vec1, Vector3 const& vec2) const;
+    /// intersection of B ), or -1 if the rays are parallel or divergent.
+    static Vector3 triangulate_point(std::vector<Vector3> const& camDirs,
+                                     std::vector<Vector3> const& camCtrs,
+                                     Vector3& errorVec);
+    
+    static bool are_nearly_parallel(bool least_squares, double angle_tol,
+                                    std::vector<Vector3> const& camDirs);
 
     void refine_point( Vector2 const& pix1,
                        Vector2 const& pix2,
-                       Vector3& point ) const;
+                       Vector3      & point ) const;
   };
 
 }}      // namespace vw::stereo

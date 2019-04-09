@@ -18,7 +18,7 @@
 
 #include <vw/Mosaic/KMLQuadTreeConfig.h>
 
-#include <vw/Image.h>
+#include <vw/Image/Transform.h>
 #include <vw/FileIO/DiskImageResourcePNG.h>
 
 #include <iomanip>
@@ -37,8 +37,7 @@ namespace vw {
 
   // This wrapper class intercepts premultiplied alpha data being written
   // to a PNG resource, and implements a pyramid-based hole-filling
-  // algorithm to extrapolate data into the alpha-masked regions of the
-  // image.
+  // algorithm to extrapolate data into the alpha-masked regions of the image.
   //
   // This is a workaround hack for a Google Earth bug, in which GE's
   // rendering of semi-transparent GroundOverlays interpolates
@@ -103,17 +102,17 @@ namespace vw {
 namespace mosaic {
 
   struct KMLQuadTreeConfigData {
-    BBox2 m_longlat_bbox;
+    BBox2       m_longlat_bbox;
     std::string m_title;
-    int m_max_lod_pixels;
-    int m_draw_order_offset;
+    int         m_max_lod_pixels;
+    int         m_draw_order_offset;
     std::string m_metadata;
     mutable std::ostringstream m_root_node_tags;
 
-    std::string kml_latlonbox( BBox2 const& longlat_bbox, bool alt ) const;
-    std::string kml_network_link( std::string const& name, std::string const& href, BBox2 const& longlat_bbox, int min_lod_pixels ) const;
+    std::string kml_latlonbox     ( BBox2 const& longlat_bbox, bool alt ) const;
+    std::string kml_network_link  ( std::string const& name, std::string const& href, BBox2 const& longlat_bbox, int min_lod_pixels ) const;
     std::string kml_ground_overlay( std::string const& href, BBox2 const& region_bbox, BBox2 const& image_bbox, int draw_order, int min_lod_pixels, int max_lod_pixels ) const;
-    BBox2 pixels_to_longlat( BBox2i const& image_bbox, Vector2i const& dimensions ) const;
+    BBox2       pixels_to_longlat ( BBox2i const& image_bbox, Vector2i const& dimensions ) const;
 
     std::vector<std::pair<std::string,vw::BBox2i> > branch_func( QuadTreeGenerator const&, std::string const& name, BBox2i const& region ) const;
     void metadata_func( QuadTreeGenerator const&, QuadTreeGenerator::TileInfo const& info ) const;
@@ -156,9 +155,9 @@ namespace mosaic {
     qtree.set_cull_images( true );
     qtree.set_file_type( "auto" );
     qtree.set_image_path_func( QuadTreeGenerator::named_tiered_image_path() );
-    qtree.set_metadata_func( boost::bind(&KMLQuadTreeConfigData::metadata_func,m_data,_1,_2) );
-    qtree.set_branch_func( boost::bind(&KMLQuadTreeConfigData::branch_func,m_data,_1,_2,_3) );
-    qtree.set_tile_resource_func( boost::bind(&KMLQuadTreeConfigData::tile_resource_func,m_data,_1,_2,_3) );
+    qtree.set_metadata_func(      boost::bind(&KMLQuadTreeConfigData::metadata_func,      m_data, _1, _2    ) );
+    qtree.set_branch_func(        boost::bind(&KMLQuadTreeConfigData::branch_func,        m_data, _1, _2, _3) );
+    qtree.set_tile_resource_func( boost::bind(&KMLQuadTreeConfigData::tile_resource_func, m_data, _1, _2, _3) );
   }
 
   GeoReference KMLQuadTreeConfig::output_georef(uint32 xresolution, uint32 yresolution) {
@@ -227,6 +226,8 @@ namespace mosaic {
     // Fractional bounding-box
     BBox2 fbb( image_bbox.min().x()/width, image_bbox.min().y()/height,
                image_bbox.width()/width, image_bbox.height()/height );
+    // Note: Below the box height is negative on purpose, as the lower-right
+    // image corner has a lower latitude than the upper-left image corner.
     BBox2 bb( m_longlat_bbox.min().x()+fbb.min().x()*m_longlat_bbox.width(),
               m_longlat_bbox.max().y()-fbb.min().y()*m_longlat_bbox.height(),
               fbb.width()*m_longlat_bbox.width(), -fbb.height()*m_longlat_bbox.height() );
@@ -257,8 +258,12 @@ namespace mosaic {
 
       double lon = (bbox.min().x()+bbox.max().x())/2;
       double lat = (bbox.min().y()+bbox.max().y())/2;
-      double range = 1e5 * (bbox.width()*cos(M_PI/180*lat)-bbox.height());
 
+      // Here we don't use the width() and height() functions, since
+      // this is a weird box, with negative width. For those, the
+      // width() function would return 0.
+      double range = 1e5 * ((bbox.max().x()-bbox.min().x())*cos(M_PI/180*lat)-(bbox.max().y()-bbox.min().y()));
+      
       if( range > 1.2e7 ) range = 1.2e7;
       m_root_node_tags << "  <LookAt><longitude>" << lon << "</longitude><latitude>" << lat << "</latitude><range>" << range << "</range></LookAt>\n";
       m_root_node_tags << "  <Style><ListStyle><listItemType>checkHideChildren</listItemType></ListStyle></Style>\n";

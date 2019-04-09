@@ -23,15 +23,20 @@
 if MAKE_MODULE_IMAGE
 
 TestAlgorithms_SOURCES            = TestAlgorithms.cxx
+TestAntiAliasing_SOURCES          = TestAntiAliasing.cxx
+TestBlobIndex_SOURCES             = TestBlobIndex.cxx
 TestBlockRasterize_SOURCES        = TestBlockRasterize.cxx
+TestCensusTransform_SOURCES       = TestCensusTransform.cxx
 TestConvolution_SOURCES           = TestConvolution.cxx
 TestEdgeExtension_SOURCES         = TestEdgeExtension.cxx
+TestErodeView_SOURCES             = TestErodeView.cxx
 TestFilter_SOURCES                = TestFilter.cxx
 TestImageMath_SOURCES             = TestImageMath.cxx
 TestImageResource_SOURCES         = TestImageResource.cxx
 TestImageViewRef_SOURCES          = TestImageViewRef.cxx
 TestImageView_SOURCES             = TestImageView.cxx
 TestImageViewMemory_SOURCES       = TestImageViewMemory.cxx
+TestInpaintView_SOURCES           = TestInpaintView.cxx
 TestInterpolation_SOURCES         = TestInterpolation.cxx
 TestManipulation_SOURCES          = TestManipulation.cxx
 TestMaskedImageMath_SOURCES       = TestMaskedImageMath.cxx
@@ -48,15 +53,20 @@ TestUtilityViews_SOURCES          = TestUtilityViews.cxx
 
 TESTS = \
   TestAlgorithms \
+  TestAntiAliasing \
+  TestBlobIndex \
   TestBlockRasterize \
+  TestCensusTransform \
   TestConvolution \
   TestEdgeExtension \
+  TestErodeView \
   TestFilter \
   TestImageMath \
   TestImageResource \
   TestImageView \
   TestImageViewMemory \
   TestImageViewRef \
+  TestInpaintView \
   TestInterpolation \
   TestManipulation \
   TestMaskedImageMath \
@@ -80,7 +90,7 @@ endif
 ########################################################################
 
 AM_CPPFLAGS = @VW_CPPFLAGS@ $(TEST_CPPFLAGS)
-AM_LDFLAGS  = @VW_LDFLAGS@ @PKG_IMAGE_LIBS@
+AM_LDFLAGS  = @VW_LDFLAGS@ @PKG_IMAGE_LIBS@ # @PKG_FILEIO_LIBS@
 
 check_PROGRAMS = $(TESTS)
 

@@ -48,14 +48,29 @@ namespace vw {
     impl_type m_impl;
 
   public:
-    typedef typename impl_type::pixel_type pixel_type;
-    typedef typename impl_type::result_type result_type;
+    typedef typename impl_type::pixel_type     pixel_type;
+    typedef typename impl_type::result_type    result_type;
     typedef typename impl_type::pixel_accessor pixel_accessor;
 
     /// Constructs a DiskImageView of the given file on disk
     /// using the specified cache area. NULL cache means skip it.
     DiskImageView( std::string const& filename, Cache* cache = &vw_system_cache() )
-      : m_rsrc( DiskImageResource::open( filename ) ), m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), m_rsrc->block_read_size(), 1, cache ) {}
+      : m_rsrc( DiskImageResource::open( filename ) ),       // Init file interface
+        m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), // Init memory storage
+                m_rsrc->block_read_size(), 1, cache ) {
+        // Check for type errors now instead of running into them when we access the image
+        try {
+          check_convertability(m_impl.child().format(), m_rsrc->format());
+        }
+        catch(vw::Exception& ex) {
+          std::string input_error(ex.what());
+          vw_throw( NoImplErr() << "DiskImageView constructor: Image file " << filename
+          << " does not match storage format in memory!\n"
+          << "    The specific error is:\n        " << input_error
+          << "\n    The ImageFormat on disk is  : " << m_rsrc->format()
+          << "\n    The ImageFormat in memory is: " << m_impl.child().format() << "\n" );
+        }
+      }
 
     /// Constructs a DiskImageView of the given resource using the
     /// specified cache area.
@@ -66,18 +81,20 @@ namespace vw {
     /// specified cache area.  Takes ownership of the resource object
     /// (i.e. deletes it when it's done using it).
     DiskImageView( DiskImageResource *resource, Cache* cache = &vw_system_cache() )
-      : m_rsrc( resource ), m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), m_rsrc->block_read_size(), 1, cache ) {}
+      : m_rsrc( resource ), 
+        m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), m_rsrc->block_read_size(), 1, cache ) {}
 
     /// Constructs a DiskImageView of the given resource using the specified
     /// cache area. Does not take ownership, you must ensure resource stays
     /// valid for the lifetime of DiskImageView
     DiskImageView( DiskImageResource &resource, Cache* cache = &vw_system_cache() )
-      : m_rsrc( &resource, NOP() ), m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), m_rsrc->block_read_size(), 1, cache ) {}
+      : m_rsrc( &resource, NOP() ), 
+        m_impl( boost::shared_ptr<SrcImageResource>(m_rsrc), m_rsrc->block_read_size(), 1, cache ) {}
 
     ~DiskImageView() {}
 
-    int32 cols() const { return m_impl.cols(); }
-    int32 rows() const { return m_impl.rows(); }
+    int32 cols  () const { return m_impl.cols();   }
+    int32 rows  () const { return m_impl.rows();   }
     int32 planes() const { return m_impl.planes(); }
 
     pixel_accessor origin() const { return m_impl.origin(); }
@@ -114,8 +131,7 @@ namespace vw {
   /// This is an assignable image view that stores the assigned data
   /// to a temporary file on disk, and then provides a cached
   /// interface (a la DiskImageView) to that data.  The temporary file
-  /// persists until this object and all copies of this object are
-  /// destroyed.
+  /// persists until this object and all copies of this object are destroyed.
   template <class PixelT>
   class DiskCacheImageView : public ImageViewBase< DiskCacheImageView<PixelT> > {
   private:
@@ -142,8 +158,8 @@ namespace vw {
     }
 
   public:
-    typedef typename DiskImageView<PixelT>::pixel_type pixel_type;
-    typedef typename DiskImageView<PixelT>::result_type result_type;
+    typedef typename DiskImageView<PixelT>::pixel_type     pixel_type;
+    typedef typename DiskImageView<PixelT>::result_type    result_type;
     typedef typename DiskImageView<PixelT>::pixel_accessor pixel_accessor;
 
     /// Create a temporary image view cache file on disk using a
@@ -156,8 +172,8 @@ namespace vw {
       this->initialize(view.impl(), progress_callback);
     }
 
-    inline int32 cols() const { return m_handle->view().cols(); }
-    inline int32 rows() const { return m_handle->view().rows(); }
+    inline int32 cols  () const { return m_handle->view().cols();   }
+    inline int32 rows  () const { return m_handle->view().rows();   }
     inline int32 planes() const { return m_handle->view().planes(); }
 
     inline pixel_accessor origin() const { return m_handle->view().origin(); }
@@ -180,7 +196,7 @@ namespace vw {
     }
     /// \endcond
   };
-
+  
 } // namespace vw
 
 #endif // __VW_FILEIO_DISKIMAGEVIEW_H__

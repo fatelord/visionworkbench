@@ -40,12 +40,17 @@
 
 namespace vw {
 
+  // Return a smart pointer, this is easier to manage
+  class DiskImageResource;
+  boost::shared_ptr<DiskImageResource> DiskImageResourcePtr(std::string const& image_file);
+  
   // *******************************************************************
   // The DiskImageResource abstract base class
   // *******************************************************************
 
-  /// Base class from which specific file handlers derive.
-  /// Noncopyable because every impl is noncopyable
+  /// A base class for ImageResource objects where the buffer is on disk.
+  /// - Base class from which specific file handlers derive.
+  /// - Noncopyable because every impl is noncopyable
   class DiskImageResource : public ImageResource,
                             private boost::noncopyable {
   public:
@@ -87,24 +92,21 @@ namespace vw {
     typedef DiskImageResource* (*construct_create_func)( std::string const& filename,
                                                          ImageFormat const& format );
 
+    /// Specify that a certain file extension should be opened with a certain
+    ///  DiskImageResource derived type.
     static void register_file_type( std::string const& extension,
                                     std::string const& disk_image_resource_type,
-                                    construct_open_func open_func,
+                                    construct_open_func   open_func,
                                     construct_create_func create_func );
 
     /// This method is called automatically the first time you read or
     /// write a file, however in some situations you may want to
     /// register the default file types _before_ registering your own
     /// file types so that you can override the default FileIO drivers.
-    //
-    /// This function is called automatically when you call register_file_type
-    /// the first time, so you don't need to call it manually anymore.
-    static void register_default_file_types() VW_DEPRECATED;
 
     // Specify whether values should be rescaled when converting
     // from one channel type to another during reads or writes.
-    // Defaults to the value of default_rescale, which defaults to
-    // true.
+    // Defaults to the value of default_rescale, which defaults to true.
     void set_rescale(bool rescale);
 
     // Specify a global default for rescale.  This is a dangerous
@@ -119,7 +121,7 @@ namespace vw {
     DiskImageResource( std::string const& filename ) : m_filename(filename), m_rescale(default_rescale) {}
     ImageFormat m_format;
     std::string m_filename;
-    bool m_rescale;
+    bool        m_rescale;
     static bool default_rescale;
   };
 
@@ -135,14 +137,13 @@ namespace vw {
     VW_OUT(InfoMessage, "fileio") << "\tLoading image: " << filename << "\t";
 
     // Open the file for reading
-    DiskImageResource *r = DiskImageResource::open( filename );
+    boost::shared_ptr<DiskImageResource> r(DiskImageResourcePtr(filename));
 
     VW_OUT(InfoMessage, "fileio") << r->cols() << "x" << r->rows() << "x" << r->planes() << "  " << r->channels() << " channel(s)\n";
 
     // Read the data
     read_image(in_image, *r);
 
-    delete r;
   }
 
 
@@ -198,6 +199,23 @@ namespace vw {
       write_image( name, out_image_vector[i] );
     }
   }
+
+  // Get the no-data value if available.
+  template<class T>
+  bool read_nodata_val(std::string const& file, T & nodata_val){
+    boost::scoped_ptr<SrcImageResource>
+      rsrc(DiskImageResource::open(file));
+    if ( rsrc->has_nodata_read() ){
+      nodata_val = rsrc->nodata_read();
+      return true;
+    }
+    return false;
+  }
+
+  ImageFormat image_format(const std::string& filename);
+
+  // Convenience function to get the width and height of an image.
+  vw::Vector2i file_image_size( std::string const& input );
 
 } // namespace vw
 

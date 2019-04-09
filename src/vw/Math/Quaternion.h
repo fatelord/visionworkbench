@@ -254,7 +254,7 @@ namespace math {
     template <class VectorT>
     explicit Quaternion( VectorBase<VectorT> const& vec ) {
       VW_ASSERT( vec.impl().size() == 4,
-                 ArgumentErr() << "Quaternion: Vector input requires 4 elements" );
+		 ArgumentErr() << "Quaternion: Vector input requires 4 elements" );
       m_core = core_type(vec.impl()[0],vec.impl()[1],vec.impl()[2],vec.impl()[3]);
     }
 
@@ -264,7 +264,7 @@ namespace math {
       double ha = angle * 0.5;
       ElemT s = ElemT(sin(ha));
       m_core = core_type(cos(ha), s * axis.impl()[0],
-                         s * axis.impl()[1], s * axis.impl()[2]);
+			 s * axis.impl()[1], s * axis.impl()[2]);
     }
 
     ElemT operator[]( size_t i ) const {
@@ -545,9 +545,22 @@ namespace math {
   }
 
 } // namespace math
+
   using math::Quaternion;
   typedef Quaternion<double> Quat;
   typedef Quaternion<float> Quatf;
+
 } // namespace vw
+
+namespace vw { namespace math {
+
+  // Quaternion interpolation
+  Quat slerp(double alpha, Quat const& a, Quat const& b, int spin);
+
+  // Compute the n-weight slerp, analogous to the linear combination
+  // w[0]*Q[0] + ... + w[n-1]*Q[n-1]. This is experimental.
+  // We assume the sum of weights is 1.
+  Quat slerp_n(std::vector<double> const& w, std::vector<Quat> const& Q, int spin);
+}}
 
 #endif // __VW_QUATERNION_H__

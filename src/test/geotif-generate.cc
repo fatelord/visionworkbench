@@ -16,12 +16,12 @@
 // __END_LICENSE__
 
 
-#include <vw/Image.h>
-#include <vw/Cartography/detail/BresenhamLine.h>
-#include <vw/Cartography.h>
+#include <vw/Image/ImageView.h>
+#include <vw/Math/BresenhamLine.h>
+#include <vw/Cartography/GeoReference.h>
 using namespace vw;
 
-void grow_bbox( cartography::BresenhamLine l,
+void grow_bbox( math::BresenhamLine l,
                 cartography::GeoReference const& georef,
                 BBox2& box ) {
   while ( l.is_good() ) {
@@ -35,25 +35,26 @@ void grow_bbox( cartography::BresenhamLine l,
 void render_degree( ImageView<PixelGray<uint8> >& image,
                     cartography::GeoReference const& georef ) {
 
-  // Find our lat lon boundry
+  // Find our lat lon boundary. Notice how all our pixels
+  // have 0<= x < image.cols() and 0 <= y < image.rows().
   BBox2 ll_box;
-  grow_bbox( cartography::BresenhamLine( Vector2(),
-                                         Vector2(image.cols(),image.rows()) ),
+  grow_bbox( math::BresenhamLine( Vector2(),
+                                  Vector2(image.cols(),image.rows()) ),
              georef, ll_box );
-  grow_bbox( cartography::BresenhamLine( Vector2(image.cols(),0),
-                                         Vector2(0,image.rows()) ),
+  grow_bbox( math::BresenhamLine( Vector2(image.cols()-1,0),
+                                  Vector2(0,image.rows()-1) ),
              georef, ll_box );
-  grow_bbox( cartography::BresenhamLine( Vector2(),
-                                         Vector2(0,image.rows()) ),
+  grow_bbox( math::BresenhamLine( Vector2(),
+                                  Vector2(0,image.rows()) ),
              georef, ll_box );
-  grow_bbox( cartography::BresenhamLine( Vector2(),
-                                         Vector2(image.cols(),0) ),
+  grow_bbox( math::BresenhamLine( Vector2(),
+                                  Vector2(image.cols(),0) ),
              georef, ll_box );
-  grow_bbox( cartography::BresenhamLine( Vector2(image.cols()-1,0),
-                                         Vector2(image.cols()-1,image.rows()-1) ),
+  grow_bbox( math::BresenhamLine( Vector2(image.cols()-1,0),
+                                  Vector2(image.cols()-1,image.rows()-1) ),
              georef, ll_box );
-  grow_bbox( cartography::BresenhamLine( Vector2(0,image.rows()-1),
-                                         Vector2(image.cols()-1,image.rows()-1) ),
+  grow_bbox( math::BresenhamLine( Vector2(0,image.rows()-1),
+                                  Vector2(image.cols()-1,image.rows()-1) ),
              georef, ll_box );
 
   BBox2i lli_box;
@@ -73,7 +74,7 @@ void render_degree( ImageView<PixelGray<uint8> >& image,
           lat < lli_box.max()[1]; lat += inc ) {
       Vector2i start = georef.lonlat_to_pixel( Vector2(lon,lat) );
       Vector2i end = georef.lonlat_to_pixel( Vector2(lon,lat+inc) );
-      cartography::BresenhamLine l( start, end );
+      math::BresenhamLine l( start, end );
       while ( l.is_good() ) {
         if ( !image_box.contains( *l ) ) {
           ++l;
@@ -92,7 +93,7 @@ void render_degree( ImageView<PixelGray<uint8> >& image,
           lon < lli_box.max()[0]; lon += inc ) {
       Vector2i start = georef.lonlat_to_pixel( Vector2(lon,lat) );
       Vector2i end = georef.lonlat_to_pixel( Vector2(lon+inc,lat) );
-      cartography::BresenhamLine l( start, end );
+      math::BresenhamLine l( start, end );
       while ( l.is_good() ) {
         if ( !image_box.contains( *l ) ) {
           ++l;
